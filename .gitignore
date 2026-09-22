@@ -1,0 +1,7 @@
+/target
+/data/
+/out/
+*.svg
+!crates/**/tests/fixtures/*.svg
+!docs/**/*.svg
+.DS_Store

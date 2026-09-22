@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="350" viewBox="0 0 400 350">
+<title>Twin regions</title>
+<style>path{fill:#fefee9;stroke:#646464;stroke-width:0.5;stroke-linejoin:round;fill-rule:evenodd}</style>
+<g id="features">
+<path id="XA-01" class="subdivision" data-name="Westland" d="M84.5 257.8L230.8 258.3L237.7 154.8L230.2 51.4L158.5 10L86.5 50.9L71 154.2ZM143.4 175.4L172.4 175.6L172.5 134.2L143.6 134.1ZM10 339.6L39.5 340L39.9 309L10.5 308.5Z"><title>Westland</title></path>
+<path id="XA-02" class="subdivision" data-name="East &amp; Co" d="M230.8 258.3L274.8 278.8L318.4 247.4L377 257L390 153.4L359.6 50.4L301.9 30.3L230.2 51.4L237.7 154.8Z"><title>East &amp; Co</title></path>
+</g>
+</svg>

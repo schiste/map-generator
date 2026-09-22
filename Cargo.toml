@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = ["crates/mapgen-core", "crates/mapgen-data", "crates/mapgen-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+repository = "https://github.com/schiste/map-generator"
+authors = ["Christophe Henner"]
+
+[workspace.dependencies]
+mapgen-core = { path = "crates/mapgen-core" }
+mapgen-data = { path = "crates/mapgen-data" }
+geo = "0.30"
+geo-types = "0.7"
+thiserror = "2"
+anyhow = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

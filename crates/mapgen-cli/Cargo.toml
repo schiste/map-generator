@@ -1,0 +1,19 @@
+[package]
+name = "mapgen-cli"
+description = "Command-line interface for map-generator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "mapgen"
+path = "src/main.rs"
+
+[dependencies]
+mapgen-core.workspace = true
+mapgen-data.workspace = true
+anyhow.workspace = true
+clap = { version = "4", features = ["derive"] }
