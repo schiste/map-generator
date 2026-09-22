@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use mapgen_core::{render, RenderOptions, SvgOptions};
+use mapgen_core::{render, MapLayers, RenderOptions};
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -14,7 +14,7 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 fn render_fixture() -> String {
-    let features = mapgen_data::geojson::read_features(
+    let subject = mapgen_data::geojson::read_features(
         &fixture("twin-regions.geojson"),
         "id",
         "name",
@@ -22,14 +22,20 @@ fn render_fixture() -> String {
     )
     .unwrap();
     let opts = RenderOptions {
-        svg: SvgOptions {
-            width: 400,
-            title: Some("Twin regions".into()),
-            ..SvgOptions::default()
-        },
-        simplify_px: 0.5,
+        width: 400,
+        title: Some("Twin regions".into()),
+        labels: true,
+        ..RenderOptions::default()
     };
-    render(&features, &opts).unwrap()
+    render(
+        &MapLayers {
+            subject,
+            ..MapLayers::default()
+        },
+        &opts,
+    )
+    .unwrap()
+    .svg
 }
 
 #[test]
@@ -59,4 +65,12 @@ fn features_are_sorted_and_escaped() {
     let b = svg.find("id=\"XA-02\"").unwrap();
     assert!(a < b);
     assert!(svg.contains("data-name=\"East &amp; Co\""));
+}
+
+#[test]
+fn layers_are_in_paint_order() {
+    let svg = render_fixture();
+    let pos = |s: &str| svg.find(s).unwrap_or_else(|| panic!("missing {s}"));
+    assert!(pos("id=\"background\"") < pos("id=\"water\""));
+    assert!(pos("id=\"water\"") < pos("<g id=\"land\">"));
 }

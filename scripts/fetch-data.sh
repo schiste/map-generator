@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Downloads the source datasets into ./data (git-ignored).
 #
-#   scripts/fetch-data.sh natural-earth   # ~400 MB, public domain
+#   scripts/fetch-data.sh ne-geojson      # ~56 MB, public domain (quickest start)
+#   scripts/fetch-data.sh natural-earth   # ~400 MB GeoPackage, public domain
 #   scripts/fetch-data.sh gadm            # ~2.6 GB, non-commercial licence
 #
 # Read docs/data-sources.md before redistributing anything built from GADM.
@@ -22,6 +23,14 @@ fetch() {
 }
 
 case "${1:-}" in
+  ne-geojson)
+    base=https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson
+    fetch "$base/ne_10m_admin_0_countries.geojson" "$DATA_DIR/ne_10m_admin_0.geojson"
+    fetch "$base/ne_10m_admin_1_states_provinces.geojson" "$DATA_DIR/ne_10m_admin_1.geojson"
+    fetch "$base/ne_10m_lakes.geojson" "$DATA_DIR/ne_10m_lakes.geojson"
+    ls -1 "$DATA_DIR"/*.geojson
+    exit 0
+    ;;
   natural-earth)
     fetch "https://naciscdn.org/naturalearth/packages/natural_earth_vector.gpkg.zip" \
       "$DATA_DIR/natural_earth_vector.gpkg.zip"
@@ -33,7 +42,7 @@ case "${1:-}" in
     unzip -n -d "$DATA_DIR" "$DATA_DIR/gadm_410-levels.zip"
     ;;
   *)
-    echo "usage: $0 {natural-earth|gadm}" >&2
+    echo "usage: $0 {ne-geojson|natural-earth|gadm}" >&2
     exit 1
     ;;
 esac

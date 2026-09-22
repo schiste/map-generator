@@ -2,53 +2,58 @@
 
 ## Principles
 
-1. **Pure core.** `mapgen-core` does no I/O. Everything is `features + options → String`.
-2. **Determinism.** No hash-ordered collections in output paths, features are sorted
-   by id, and numbers are printed at a fixed precision with trailing zeros stripped
-   (`svg::fmt_num`). Golden-file tests in `crates/mapgen-data/tests` enforce this.
-3. **Load only what you draw.** Adapters push region filters into SQL and stream rows.
+1. **Pure core.** `mapgen-core` does no I/O: `render(layers, options) → Rendered`.
+2. **Determinism.** Layers are sorted by id, hash maps are used only for lookups (never
+   iterated into output), and numbers are printed at a fixed precision with trailing zeros
+   stripped (`svg::fmt_num`). Golden tests and `scripts/build-examples.sh` enforce this.
+3. **Load only what you draw.** GeoPackage filters run in SQL and rows are streamed.
 
-## Stages
+## Stages (`pipeline.rs`)
 
-### 1. Ingest (`mapgen-data`)
+### 1. Frame (`frame.rs`)
 
-GeoPackage geometries are a small GeoPackage header followed by standard WKB.
-`geozero::wkb::GpkgWkb` decodes both. The geometry column is discovered from
-`gpkg_geometry_columns` rather than assumed. Table and column names cannot be
-SQL parameters, so they are restricted to `[A-Za-z0-9_]` before interpolation.
+The *anchor* is the geometry whose extent becomes the map frame:
+
+- `auto`: single-linkage clustering of the subject's polygons (bounding boxes within
+  500 km, antimeridian-aware), keeping the cluster with the largest area. This drops
+  French Guiana and Réunion from France but keeps Corsica.
+- `all`: every polygon.
+- `bbox`: a densified lon/lat box (presets: `europe`, `oceania`…; `west > east` crosses 180°).
+- `world`: no anchor; the frame is the globe outline.
 
 ### 2. Projection (`projection.rs`)
 
-The core always uses a spherical **Lambert Azimuthal Equal-Area** projection
-centred on the region, using the authalic radius. This matches the idea behind
-EPSG:3035 (which is LAEA centred on 52°N 10°E) and generalises it to every region.
-An optional `proj` backend for explicit EPSG codes is on the roadmap.
+- **LAEA** (spherical, authalic radius) centred on the anchor. It preserves area, and
+  EPSG:3035 is the same projection centred on 52°N 10°E.
+- **Equal Earth** for world maps, or when the anchor spans more than 200° of longitude.
 
 ### 3. Antimeridian (`antimeridian.rs`)
 
-Azimuthal projections have no seam at ±180°. Each point is projected using
-`wrap(lon − lon0)`, so a region that straddles the antimeridian stays continuous
-**as long as the centre is chosen on the correct side of the globe**. That is
-what `center_longitude` is for: it finds the smallest arc that covers all
-longitudes. Cylindrical/conic projections for world maps will need true ring
-splitting.
+The centre longitude comes from `covering_arc`: sort the longitudes, find the widest empty
+gap, and take the complement arc. That gives Fiji 178°E, not 0°. LAEA wraps `lon − lon0`
+per point, so it has no seam. Equal Earth does, so `split_at_seam` unwraps each ring,
+shifts it by 360° as needed, and intersects only crossing polygons with ±180° strips.
+Non-crossing polygons keep bit-identical coordinates.
 
 ### 4. Simplification (`simplify.rs`)
 
-Topology-preserving Visvalingam–Whyatt (`geo::SimplifyVwPreserve`). The
-tolerance is specified in **output pixels** and converted to projected units²
-once the viewport scale is known. That way the same `--simplify 0.5` means the
-same visual fidelity at any map size.
+This is TopoJSON-style: find junctions (vertices whose neighbour pair differs between the
+rings using them), cut rings into arcs, deduplicate arcs by canonical orientation,
+simplify each arc once with Visvalingam–Whyatt (endpoints fixed), and stitch the rings
+back together. The tolerance is given in pixels (`--simplify`) and converted to projected
+units² once the scale is known. A region never disappears; if all of it collapses, its
+largest part is kept unsimplified.
 
-#### Shared-border topology (not yet implemented)
+### 5. Clip and cull
 
-Simplifying each polygon independently can drop different vertices on each
-side of a shared border, which leaves slivers and gaps. The planned fix is to
-build arcs as TopoJSON does: split rings at junction points, deduplicate the
-shared arcs, simplify each arc once, then reassemble the rings.
+Features are clipped to the frame rectangle (`geo::BooleanOps`). Features entirely inside
+the frame skip clipping, so shared borders stay exact. Parts smaller than `--min-area` px²
+are dropped, except the largest part of each subject region.
 
-### 5. SVG (`svg.rs`)
+### 6. Output (`svg.rs`, `html.rs`, `theme.rs`)
 
-Hand-written serialiser with XML escaping. Each feature becomes one `<path>` with
-`id`, `class`, `data-name`, and a `<title>` child for accessibility. Holes use
-`fill-rule: evenodd`.
+Layers in paint order: `#background`, `#water`, `#context`, `#land`, `#lakes`, `#labels`.
+Every colour is defined once in the `<style>` block (`.mg-water{fill:…}`), optionally as
+`var(--mg-water, …)`. Ids are made XML-valid and unique. HTML output inlines the SVG and
+adds colour pickers, theme presets, and a download button that bakes the chosen colours
+back into a plain SVG.

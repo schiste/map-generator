@@ -1,43 +1,135 @@
 //! Antimeridian (±180°) handling.
 //!
-//! With an azimuthal projection centred on the region, ±180° is *not* a seam:
-//! every point is projected relative to the centre (`wrap_longitude(lon - lon0)`),
-//! so Fiji or Chukotka stay continuous. The real hazard is choosing that centre.
-//! A naive bounding box of Fiji spans -180..180 and puts the centre near
-//! Greenwich, on the far side of the planet.
+//! Azimuthal projections (LAEA) have no seam at ±180°: each point is projected
+//! relative to the centre with `wrap_longitude(lon - lon0)`, so Fiji or
+//! Chukotka stay continuous *provided the centre is on the right side of the
+//! globe*. [`center_longitude`] takes care of that.
 //!
-//! Cylindrical and conic projections (planned for world/continent maps) *do*
-//! have a seam and will need true ring splitting at the seam longitude.
+//! Pseudo-cylindrical projections (Equal Earth) do have a seam, at
+//! `lon0 ± 180°`. [`split_at_seam`] cuts polygons along it before projecting.
+
+use geo::{BooleanOps, MapCoords};
+use geo_types::{coord, Coord, LineString, MultiPolygon, Polygon, Rect};
 
 /// Wraps a longitude difference or absolute longitude into `[-180, 180)`.
 pub fn wrap_longitude(lon: f64) -> f64 {
     (lon + 180.0).rem_euclid(360.0) - 180.0
 }
 
-/// Returns the longitude at the centre of the smallest arc of the circle
-/// that contains every input longitude.
+/// Smallest arc of the circle containing every longitude, as `(start, length)`
+/// going east from `start`. `None` for an empty input.
 ///
-/// Inputs are in degrees, in any range. The result is in `[-180, 180)`.
+/// Finds the widest empty gap between sorted longitudes (including the
+/// wrap-around gap); the covering arc is its complement.
+pub fn covering_arc(lons: &[f64]) -> Option<(f64, f64)> {
+    let mut v: Vec<f64> = lons.iter().map(|&l| wrap_longitude(l)).collect();
+    v.sort_by(f64::total_cmp);
+    v.dedup();
+    let n = v.len();
+    if n == 0 {
+        return None;
+    }
+    let mut best_gap = v[0] + 360.0 - v[n - 1];
+    let mut start = 0;
+    for i in 1..n {
+        let gap = v[i] - v[i - 1];
+        if gap > best_gap {
+            best_gap = gap;
+            start = i;
+        }
+    }
+    Some((v[start], 360.0 - best_gap))
+}
+
+/// Centre of the smallest arc containing every longitude, in `[-180, 180)`.
 /// An empty slice returns `0.0`.
 pub fn center_longitude(lons: &[f64]) -> f64 {
-    if lons.is_empty() {
-        return 0.0;
+    covering_arc(lons).map_or(0.0, |(start, len)| wrap_longitude(start + len / 2.0))
+}
+
+/// Cuts polygons along the seam of a projection centred on `lon0`.
+///
+/// Output longitudes satisfy `lon - lon0 ∈ [-180, 180]`, with no ring
+/// crossing the seam. Polygons that don't cross it are returned
+/// coordinate-for-coordinate unchanged (apart from the ±360° shift), so
+/// shared borders between neighbours stay bit-identical.
+pub fn split_at_seam(mp: &MultiPolygon<f64>, lon0: f64) -> MultiPolygon<f64> {
+    let mut out = Vec::new();
+    for poly in mp {
+        let mut ext = unwrap_relative(poly.exterior(), lon0);
+        let (a, b) = x_range(&ext);
+        let k = (((a + b) / 2.0 + 180.0) / 360.0).floor();
+        shift_x(&mut ext, -360.0 * k);
+        let (a, b) = (a - 360.0 * k, b - 360.0 * k);
+        let mid = (a + b) / 2.0;
+        let holes = poly
+            .interiors()
+            .iter()
+            .map(|h| {
+                let mut h = unwrap_relative(h, lon0);
+                let (ha, hb) = x_range(&h);
+                shift_x(&mut h, -360.0 * (((ha + hb) / 2.0 - mid) / 360.0).round());
+                h
+            })
+            .collect();
+        let rel = Polygon::new(ext, holes);
+
+        if a >= -180.0 && b <= 180.0 {
+            out.push(rel);
+            continue;
+        }
+        let k_min = ((a + 180.0) / 360.0).floor() as i32;
+        let k_max = ((b - 180.0) / 360.0).ceil() as i32;
+        for k in k_min..=k_max {
+            let off = 360.0 * f64::from(k);
+            let strip = Rect::new(
+                coord! { x: -180.0 + off, y: -90.0 },
+                coord! { x: 180.0 + off, y: 90.0 },
+            )
+            .to_polygon();
+            for part in rel.intersection(&strip) {
+                out.push(part.map_coords(|c| coord! { x: c.x - off, y: c.y }));
+            }
+        }
     }
-    // TODO(contributor): this midpoint-of-extremes version is wrong for any
-    // region straddling ±180° (Fiji, Russia, Kiribati, Alaska's Aleutians).
-    // Replace it with the "largest empty gap" approach: sort the wrapped
-    // longitudes, find the widest gap between neighbours (including the
-    // wrap-around gap from last back to first + 360), and return the
-    // midpoint of the arc that is the complement of that gap.
-    // Then remove the #[ignore] on `fiji_centre_is_near_180` below.
-    let min = lons.iter().copied().fold(f64::INFINITY, f64::min);
-    let max = lons.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    wrap_longitude((min + max) / 2.0)
+    MultiPolygon(out).map_coords(|c| coord! { x: c.x + lon0, y: c.y })
+}
+
+/// Longitudes relative to `lon0`, made continuous along the ring (no jump
+/// larger than 180° between consecutive vertices).
+fn unwrap_relative(ring: &LineString<f64>, lon0: f64) -> LineString<f64> {
+    let mut out: Vec<Coord<f64>> = Vec::with_capacity(ring.0.len());
+    let mut prev: Option<(f64, f64)> = None; // (raw lon, relative lon)
+    for c in &ring.0 {
+        let rel = match prev {
+            None => wrap_longitude(c.x - lon0),
+            Some((raw, rel)) => rel + wrap_longitude(c.x - raw),
+        };
+        prev = Some((c.x, rel));
+        out.push(coord! { x: rel, y: c.y });
+    }
+    LineString(out)
+}
+
+fn x_range(ls: &LineString<f64>) -> (f64, f64) {
+    ls.0.iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), c| {
+            (a.min(c.x), b.max(c.x))
+        })
+}
+
+fn shift_x(ls: &mut LineString<f64>, dx: f64) {
+    if dx != 0.0 {
+        for c in &mut ls.0 {
+            c.x += dx;
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use geo::Area;
 
     fn angular_distance(a: f64, b: f64) -> f64 {
         wrap_longitude(a - b).abs()
@@ -58,9 +150,51 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "enable once center_longitude handles ±180° (see TODO)"]
     fn fiji_centre_is_near_180() {
         let c = center_longitude(&[177.0, 178.5, -179.8, -178.2]);
         assert!(angular_distance(c, 179.4) < 1e-9, "got {c}");
+    }
+
+    #[test]
+    fn single_and_repeated_points() {
+        assert_eq!(center_longitude(&[42.0]), 42.0);
+        assert_eq!(center_longitude(&[-10.0, -10.0, -10.0]), -10.0);
+        assert_eq!(center_longitude(&[]), 0.0);
+    }
+
+    #[test]
+    fn span_of_russia_like_extent() {
+        let (_, len) = covering_arc(&[20.0, 100.0, 179.9, -170.0]).unwrap();
+        assert!((len - 170.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn seam_split_preserves_area_and_range() {
+        // A square from 170°E to 170°W, split by a seam at 180° (lon0 = 0).
+        let sq = Polygon::new(
+            LineString::from(vec![
+                (170.0, 0.0),
+                (-170.0, 0.0),
+                (-170.0, 10.0),
+                (170.0, 10.0),
+            ]),
+            vec![],
+        );
+        let out = split_at_seam(&MultiPolygon(vec![sq]), 0.0);
+        assert_eq!(out.0.len(), 2);
+        assert!((out.unsigned_area() - 200.0).abs() < 1e-6);
+        for c in out.0.iter().flat_map(|p| p.exterior().0.iter()) {
+            assert!(c.x >= -180.0 - 1e-9 && c.x <= 180.0 + 1e-9);
+        }
+    }
+
+    #[test]
+    fn non_crossing_polygon_is_untouched() {
+        let p = Polygon::new(
+            LineString::from(vec![(1.5, 2.25), (3.0, 2.0), (2.0, 4.0), (1.5, 2.25)]),
+            vec![],
+        );
+        let out = split_at_seam(&MultiPolygon(vec![p.clone()]), 0.0);
+        assert_eq!(out.0, vec![p]);
     }
 }

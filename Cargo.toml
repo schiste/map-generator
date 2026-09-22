@@ -13,10 +13,11 @@ authors = ["Christophe Henner"]
 [workspace.dependencies]
 mapgen-core = { path = "crates/mapgen-core" }
 mapgen-data = { path = "crates/mapgen-data" }
-geo = "0.30"
+geo = { version = "0.30", default-features = false }
 geo-types = "0.7"
 thiserror = "2"
 anyhow = "1"
+rayon = "1"
 
 [profile.release]
 lto = "thin"

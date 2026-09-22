@@ -1,12 +1,21 @@
-use crate::antimeridian::{center_longitude, wrap_longitude};
-use crate::feature::MapFeature;
+use crate::antimeridian::wrap_longitude;
 
 /// Authalic (equal-area) radius of the WGS84 ellipsoid, in metres.
 pub const AUTHALIC_RADIUS_M: f64 = 6_371_007.181;
 
-/// Forward map projection from WGS84 degrees to planar metres.
+/// Forward map projection from WGS84 degrees to planar metres (y up).
 pub trait Projection {
     fn project(&self, lon: f64, lat: f64) -> (f64, f64);
+}
+
+/// Which projection to use; `Auto` picks LAEA for regions and Equal Earth for
+/// world maps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProjectionChoice {
+    #[default]
+    Auto,
+    Laea,
+    EqualEarth,
 }
 
 /// Spherical Lambert Azimuthal Equal-Area projection.
@@ -35,22 +44,67 @@ impl Projection for LambertAzimuthalEqualArea {
     }
 }
 
-/// Picks a LAEA projection centred on the given features.
-pub fn select_projection(features: &[MapFeature]) -> LambertAzimuthalEqualArea {
-    let mut lons = Vec::new();
-    let (mut min_lat, mut max_lat) = (f64::INFINITY, f64::NEG_INFINITY);
-    for f in features {
-        for poly in &f.geometry {
-            for c in poly.exterior() {
-                lons.push(c.x);
-                min_lat = min_lat.min(c.y);
-                max_lat = max_lat.max(c.y);
-            }
+/// Equal Earth pseudo-cylindrical projection (Šavrič, Patterson & Jenny, 2018).
+///
+/// Its seam is at `lon0 ± 180°`; geometries must go through
+/// [`crate::antimeridian::split_at_seam`] first.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EqualEarth {
+    pub lon0: f64,
+}
+
+impl Projection for EqualEarth {
+    fn project(&self, lon: f64, lat: f64) -> (f64, f64) {
+        const A1: f64 = 1.340264;
+        const A2: f64 = -0.081106;
+        const A3: f64 = 0.000893;
+        const A4: f64 = 0.003796;
+        let d = lon - self.lon0;
+        // Seam-split input sits in [-180, 180]; keep ±180 on its own side
+        // instead of letting `wrap_longitude` fold +180 onto -180.
+        let dlon = if d.abs() <= 180.0 + 1e-6 {
+            d.clamp(-180.0, 180.0)
+        } else {
+            wrap_longitude(d)
+        };
+        let lam = dlon.to_radians();
+        let m = 3f64.sqrt() / 2.0;
+        let theta = (m * lat.to_radians().sin()).asin();
+        let t2 = theta * theta;
+        let t6 = t2 * t2 * t2;
+        let x = AUTHALIC_RADIUS_M * 2.0 * 3f64.sqrt() * lam * theta.cos()
+            / (3.0 * (9.0 * A4 * t6 * t2 + 7.0 * A3 * t6 + 3.0 * A2 * t2 + A1));
+        let y = AUTHALIC_RADIUS_M * theta * (A1 + A2 * t2 + t6 * (A3 + A4 * t2));
+        (x, y)
+    }
+}
+
+/// The projection actually used for a map.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MapProjection {
+    Laea(LambertAzimuthalEqualArea),
+    EqualEarth(EqualEarth),
+}
+
+impl MapProjection {
+    pub fn has_seam(&self) -> bool {
+        matches!(self, MapProjection::EqualEarth(_))
+    }
+
+    pub fn lon0(&self) -> f64 {
+        match self {
+            MapProjection::Laea(p) => p.lon0,
+            MapProjection::EqualEarth(p) => p.lon0,
         }
     }
-    LambertAzimuthalEqualArea {
-        lon0: center_longitude(&lons),
-        lat0: (min_lat + max_lat) / 2.0,
+}
+
+impl Projection for MapProjection {
+    fn project(&self, lon: f64, lat: f64) -> (f64, f64) {
+        match self {
+            MapProjection::Laea(p) => p.project(lon, lat),
+            MapProjection::EqualEarth(p) => p.project(lon, lat),
+        }
     }
 }
 
@@ -88,5 +142,21 @@ mod tests {
         let (xb, _) = p.project(-179.9, -17.0);
         // 0.2° of longitude apart, so ~20 km, not ~40 000 km.
         assert!((xb - xa).abs() < 30_000.0);
+    }
+
+    #[test]
+    fn equal_earth_symmetry_and_seam() {
+        let p = EqualEarth { lon0: 0.0 };
+        let (x0, y0) = p.project(0.0, 0.0);
+        assert!(x0.abs() < 1e-9 && y0.abs() < 1e-9);
+        let (xe, _) = p.project(180.0, 0.0);
+        let (xw, _) = p.project(-180.0, 0.0);
+        assert!(
+            xe > 0.0 && (xe + xw).abs() < 1e-6,
+            "±180 must stay on their own sides"
+        );
+        let (_, yn) = p.project(0.0, 90.0);
+        let (_, ys) = p.project(0.0, -90.0);
+        assert!((yn + ys).abs() < 1e-6 && yn > 0.0);
     }
 }

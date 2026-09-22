@@ -5,3 +5,7 @@
 !crates/**/tests/fixtures/*.svg
 !docs/**/*.svg
 .DS_Store
+
+# local tooling
+.aethyme/
+.chau7/

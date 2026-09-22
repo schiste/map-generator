@@ -1,9 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="400" height="350" viewBox="0 0 400 350">
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="352" viewBox="0 0 400 352">
 <title>Twin regions</title>
-<style>path{fill:#fefee9;stroke:#646464;stroke-width:0.5;stroke-linejoin:round;fill-rule:evenodd}</style>
-<g id="features">
-<path id="XA-01" class="subdivision" data-name="Westland" d="M84.5 257.8L230.8 258.3L237.7 154.8L230.2 51.4L158.5 10L86.5 50.9L71 154.2ZM143.4 175.4L172.4 175.6L172.5 134.2L143.6 134.1ZM10 339.6L39.5 340L39.9 309L10.5 308.5Z"><title>Westland</title></path>
-<path id="XA-02" class="subdivision" data-name="East &amp; Co" d="M230.8 258.3L274.8 278.8L318.4 247.4L377 257L390 153.4L359.6 50.4L301.9 30.3L230.2 51.4L237.7 154.8Z"><title>East &amp; Co</title></path>
+<style>
+path{stroke-linejoin:round;fill-rule:evenodd}
+.mg-background{fill:#ffffff}
+.mg-water{fill:#c6ecff}
+.mg-context{fill:#f6e1b9;stroke:#a08070;stroke-width:0.4}
+.mg-land{fill:#fefee9;stroke:#646464;stroke-width:0.5}
+.mg-lake{fill:#c6ecff;stroke:#0978ab;stroke-width:0.4}
+.mg-label{fill:#333333;font:11px sans-serif;text-anchor:middle;dominant-baseline:central;paint-order:stroke;stroke:#fefee9;stroke-width:2.5px;stroke-linejoin:round}
+</style>
+<rect id="background" class="mg-background" width="400" height="352"/>
+<path id="water" class="mg-water" d="M400 351.3L400 0L0 0L0 351.3Z"/>
+<g id="land">
+<path id="XA-01" class="mg-land subdivision" data-name="Westland" d="M230 256.8L236.8 156L229.5 55.2L159.6 14.8L89.4 54.7L74.3 155.3L87.4 256.3ZM173.2 135.8L145 135.7L144.8 176.1L173.1 176.2ZM43.9 306.2L15.3 305.8L14.8 336L43.5 336.4Z"><title>Westland</title></path>
+<path id="XA-02" class="mg-land subdivision" data-name="East &amp; Co" d="M230 256.8L272.9 276.8L315.4 246.2L372.6 255.6L385.2 154.6L355.5 54.2L299.3 34.6L229.5 55.2L236.8 156Z"><title>East &amp; Co</title></path>
+</g>
+<g id="labels">
+<text class="mg-label" x="111.1" y="135.8">Westland</text>
+<text class="mg-label" x="310.9" y="155.7">East &amp; Co</text>
 </g>
 </svg>

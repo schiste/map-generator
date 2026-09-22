@@ -16,4 +16,5 @@ path = "src/main.rs"
 mapgen-core.workspace = true
 mapgen-data.workspace = true
 anyhow.workspace = true
+rayon.workspace = true
 clap = { version = "4", features = ["derive"] }

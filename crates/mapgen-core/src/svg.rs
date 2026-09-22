@@ -1,42 +1,14 @@
+use std::collections::HashSet;
 use std::fmt::Write;
 
+use geo::{Area, BoundingRect, InteriorPoint};
 use geo_types::{LineString, MultiPolygon};
 
 use crate::feature::MapFeature;
-
-/// Presentation options for the SVG writer.
-///
-/// The defaults follow the Wikimedia Commons location-map palette.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SvgOptions {
-    /// Output width in pixels; height is derived from the projected aspect ratio.
-    pub width: u32,
-    /// Blank margin around the drawing, in pixels.
-    pub padding: u32,
-    /// Decimal places kept for path coordinates.
-    pub precision: usize,
-    pub title: Option<String>,
-    pub fill: String,
-    pub stroke: String,
-    pub stroke_width: f64,
-}
-
-impl Default for SvgOptions {
-    fn default() -> Self {
-        Self {
-            width: 1000,
-            padding: 10,
-            precision: 1,
-            title: None,
-            fill: "#fefee9".into(),
-            stroke: "#646464".into(),
-            stroke_width: 0.5,
-        }
-    }
-}
+use crate::theme::Theme;
 
 /// Affine transform from projected metres to SVG pixels (y axis flipped).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Viewport {
     pub min_x: f64,
     pub max_y: f64,
@@ -47,7 +19,7 @@ pub struct Viewport {
 }
 
 impl Viewport {
-    fn to_px(self, x: f64, y: f64) -> (f64, f64) {
+    pub fn to_px(self, x: f64, y: f64) -> (f64, f64) {
         (
             self.padding + (x - self.min_x) * self.scale,
             self.padding + (self.max_y - y) * self.scale,
@@ -55,43 +27,234 @@ impl Viewport {
     }
 }
 
-/// Serialises already-projected features into an SVG document.
-pub fn write_svg(features: &[MapFeature], viewport: Viewport, opts: &SvgOptions) -> String {
+/// Everything the writer needs; all geometries are already projected.
+#[derive(Debug, Clone, Copy)]
+pub struct SvgDocument<'a> {
+    pub viewport: Viewport,
+    /// Sea: the frame rectangle, or the globe outline on world maps.
+    pub water: &'a MultiPolygon<f64>,
+    pub context: &'a [MapFeature],
+    pub subject: &'a [MapFeature],
+    pub lakes: &'a [MapFeature],
+    pub labels: bool,
+    pub theme: &'a Theme,
+    pub title: Option<&'a str>,
+    /// Decimal places kept for coordinates.
+    pub precision: usize,
+    /// Emit colours as `var(--mg-<slot>, <colour>)` so a page embedding the
+    /// SVG inline can restyle it with CSS custom properties.
+    pub css_vars: bool,
+}
+
+/// Serialises a map into an SVG document.
+///
+/// Layers, bottom to top: `#background`, `#water`, `#context`, `#land`,
+/// `#lakes`, `#labels`. Colours live in the `<style>` block only.
+pub fn write_svg(doc: &SvgDocument) -> String {
+    let vp = doc.viewport;
+    let p = doc.precision;
+    let (w, h) = (vp.width, vp.height);
     let mut out = String::new();
-    let (w, h) = (viewport.width, viewport.height);
+    let mut ids = HashSet::new();
+
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     let _ = writeln!(
         out,
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\">"
     );
-    if let Some(title) = &opts.title {
+    if let Some(title) = doc.title {
         let _ = writeln!(out, "<title>{}</title>", escape(title));
     }
     let _ = writeln!(
         out,
-        "<style>path{{fill:{};stroke:{};stroke-width:{};stroke-linejoin:round;fill-rule:evenodd}}</style>",
-        escape(&opts.fill),
-        escape(&opts.stroke),
-        fmt_num(opts.stroke_width, 3)
+        "<style>\n{}</style>",
+        stylesheet(doc.theme, doc.css_vars)
     );
-    out.push_str("<g id=\"features\">\n");
-    for f in features {
-        let d = path_data(&f.geometry, viewport, opts.precision);
-        if d.is_empty() {
-            continue;
+    let _ = writeln!(
+        out,
+        "<rect id=\"background\" class=\"mg-background\" width=\"{w}\" height=\"{h}\"/>"
+    );
+    let water = path_data(doc.water, vp, p);
+    if !water.is_empty() {
+        let _ = writeln!(out, "<path id=\"water\" class=\"mg-water\" d=\"{water}\"/>");
+    }
+    write_layer(
+        &mut out,
+        &mut ids,
+        "context",
+        "mg-context",
+        "",
+        doc.context,
+        vp,
+        p,
+    );
+    write_layer(
+        &mut out,
+        &mut ids,
+        "land",
+        "mg-land",
+        "",
+        doc.subject,
+        vp,
+        p,
+    );
+    write_layer(
+        &mut out, &mut ids, "lakes", "mg-lake", "lake-", doc.lakes, vp, p,
+    );
+    if doc.labels {
+        write_labels(&mut out, doc.subject, vp, doc.theme.label_size);
+    }
+    out.push_str("</svg>\n");
+    out
+}
+
+/// The `<style>` contents: every colour of the map is defined here.
+pub fn stylesheet(theme: &Theme, css_vars: bool) -> String {
+    let c = |slot: &str| {
+        let value = theme
+            .colors()
+            .iter()
+            .find(|(s, _)| *s == slot)
+            .map(|(_, c)| c.as_str().to_owned())
+            .unwrap_or_default();
+        if css_vars {
+            format!("var(--mg-{slot},{value})")
+        } else {
+            value
         }
+    };
+    let bw = fmt_num(theme.border_width, 3);
+    let cbw = fmt_num(theme.context_border_width, 3);
+    let ls = fmt_num(theme.label_size, 2);
+    format!(
+        "path{{stroke-linejoin:round;fill-rule:evenodd}}\n\
+         .mg-background{{fill:{bg}}}\n\
+         .mg-water{{fill:{water}}}\n\
+         .mg-context{{fill:{ctx};stroke:{ctxb};stroke-width:{cbw}}}\n\
+         .mg-land{{fill:{land};stroke:{border};stroke-width:{bw}}}\n\
+         .mg-lake{{fill:{water};stroke:{lakeb};stroke-width:{cbw}}}\n\
+         .mg-label{{fill:{label};font:{ls}px sans-serif;text-anchor:middle;dominant-baseline:central;\
+         paint-order:stroke;stroke:{land};stroke-width:2.5px;stroke-linejoin:round}}\n",
+        bg = c("background"),
+        water = c("water"),
+        ctx = c("context-land"),
+        ctxb = c("context-border"),
+        land = c("land"),
+        border = c("border"),
+        lakeb = c("lake-border"),
+        label = c("label"),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_layer(
+    out: &mut String,
+    ids: &mut HashSet<String>,
+    group: &str,
+    layer_class: &str,
+    id_prefix: &str,
+    features: &[MapFeature],
+    vp: Viewport,
+    precision: usize,
+) {
+    let paths: Vec<(&MapFeature, String)> = features
+        .iter()
+        .map(|f| (f, path_data(&f.geometry, vp, precision)))
+        .filter(|(_, d)| !d.is_empty())
+        .collect();
+    if paths.is_empty() {
+        return;
+    }
+    let _ = writeln!(out, "<g id=\"{group}\">");
+    for (f, d) in paths {
+        let id = unique_id(ids, &format!("{id_prefix}{}", f.id));
         let _ = writeln!(
             out,
-            "<path id=\"{}\" class=\"{}\" data-name=\"{}\" d=\"{}\"><title>{}</title></path>",
-            escape(&f.id),
+            "<path id=\"{}\" class=\"{layer_class} {}\" data-name=\"{}\" d=\"{d}\"><title>{}</title></path>",
+            escape(&id),
             escape(&f.class),
             escape(&f.name),
-            d,
-            escape(&f.name)
+            escape(&f.name),
         );
     }
-    out.push_str("</g>\n</svg>\n");
-    out
+    out.push_str("</g>\n");
+}
+
+fn write_labels(out: &mut String, features: &[MapFeature], vp: Viewport, size: f64) {
+    // Candidates: (area, feature index, x, y, half width, half height) in px.
+    let mut candidates = Vec::new();
+    for (i, f) in features.iter().enumerate() {
+        let Some(poly) = f
+            .geometry
+            .0
+            .iter()
+            .max_by(|a, b| a.unsigned_area().total_cmp(&b.unsigned_area()))
+        else {
+            continue;
+        };
+        let (Some(pt), Some(bb)) = (poly.interior_point(), poly.bounding_rect()) else {
+            continue;
+        };
+        let (hw, hh) = (0.3 * size * f.name.chars().count() as f64, 0.6 * size);
+        // Skip labels that clearly don't fit their region.
+        if bb.width() * vp.scale < 2.0 * hw || bb.height() * vp.scale < 2.0 * hh {
+            continue;
+        }
+        let (x, y) = vp.to_px(pt.x(), pt.y());
+        candidates.push((poly.unsigned_area(), i, x, y, hw, hh));
+    }
+    // Largest regions claim space first; a label overlapping one already
+    // placed is dropped.
+    candidates.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    let mut placed: Vec<(usize, f64, f64, f64, f64)> = Vec::new();
+    for &(_, i, x, y, hw, hh) in &candidates {
+        let clear = placed
+            .iter()
+            .all(|&(_, px, py, phw, phh)| (x - px).abs() >= hw + phw || (y - py).abs() >= hh + phh);
+        if clear {
+            placed.push((i, x, y, hw, hh));
+        }
+    }
+    if placed.is_empty() {
+        return;
+    }
+    placed.sort_by_key(|p| p.0);
+    out.push_str("<g id=\"labels\">\n");
+    for (i, x, y, _, _) in placed {
+        let _ = writeln!(
+            out,
+            "<text class=\"mg-label\" x=\"{}\" y=\"{}\">{}</text>",
+            fmt_num(x, 1),
+            fmt_num(y, 1),
+            escape(&features[i].name)
+        );
+    }
+    out.push_str("</g>\n");
+}
+
+/// Makes a valid, unique XML id: invalid characters become `_`, ids that
+/// can't start a name get an `id-` prefix, and repeats get `-2`, `-3`...
+fn unique_id(used: &mut HashSet<String>, raw: &str) -> String {
+    let mut id: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || "_.-".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if !id.starts_with(|c: char| c.is_alphabetic() || c == '_') {
+        id.insert_str(0, "id-");
+    }
+    let mut candidate = id.clone();
+    let mut n = 2;
+    while !used.insert(candidate.clone()) {
+        candidate = format!("{id}-{n}");
+        n += 1;
+    }
+    candidate
 }
 
 fn path_data(geometry: &MultiPolygon<f64>, vp: Viewport, precision: usize) -> String {
@@ -145,7 +308,7 @@ pub fn fmt_num(v: f64, precision: usize) -> String {
     s
 }
 
-fn escape(s: &str) -> String {
+pub(crate) fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
         match ch {
@@ -175,5 +338,22 @@ mod tests {
     #[test]
     fn escapes_xml() {
         assert_eq!(escape("A&B <\"x\">"), "A&amp;B &lt;&quot;x&quot;&gt;");
+    }
+
+    #[test]
+    fn ids_are_valid_and_unique() {
+        let mut used = HashSet::new();
+        assert_eq!(unique_id(&mut used, "FR-75"), "FR-75");
+        assert_eq!(unique_id(&mut used, "FR-75"), "FR-75-2");
+        assert_eq!(unique_id(&mut used, "1159106863"), "id-1159106863");
+        assert_eq!(unique_id(&mut used, "a b\"c"), "a_b_c");
+    }
+
+    #[test]
+    fn css_vars_keep_fallbacks() {
+        let css = stylesheet(&Theme::default(), true);
+        assert!(css.contains(".mg-water{fill:var(--mg-water,#c6ecff)}"));
+        let plain = stylesheet(&Theme::default(), false);
+        assert!(plain.contains(".mg-water{fill:#c6ecff}"));
     }
 }

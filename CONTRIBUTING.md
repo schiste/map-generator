@@ -12,7 +12,9 @@ Thanks for helping! A few ground rules keep the output reproducible:
    UPDATE_GOLDEN=1 cargo test -p mapgen-data --test golden
    git diff crates/mapgen-data/tests/fixtures
    ```
-4. Do not commit datasets or maps generated from GADM (see `docs/data-sources.md`).
+4. If the change affects rendering, run `scripts/build-examples.sh` (after
+   `scripts/fetch-data.sh ne-geojson`) and commit the updated `docs/examples`.
+5. Do not commit datasets or maps generated from GADM (see `docs/data-sources.md`).
    Test fixtures must be hand-made or public domain.
 
 Contributions are accepted under the MIT License.

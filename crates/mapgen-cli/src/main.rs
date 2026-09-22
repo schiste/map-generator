@@ -1,9 +1,14 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use mapgen_core::{render, RenderOptions, SvgOptions};
-use mapgen_data::Source;
+use mapgen_core::frame::BBOX_PRESETS;
+use mapgen_core::{
+    html_page, render, Color, FrameMode, GeoBBox, MapFeature, MapLayers, ProjectionChoice,
+    RenderOptions, Theme,
+};
+use mapgen_data::{list_regions, read_grouped, read_layer, Format, LayerQuery, Source};
+use rayon::prelude::*;
 
 /// Deterministic SVG map generator.
 #[derive(Parser)]
@@ -15,99 +20,498 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Render one region to an SVG file.
+    /// Render one map to an SVG (or interactive HTML) file.
     Render(RenderArgs),
+    /// Render one map per region (e.g. every country) in parallel.
+    Batch(BatchArgs),
+    /// List built-in colour themes and frame presets.
+    Themes,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
 enum Dataset {
-    /// GADM 4.1 levels GeoPackage.
+    /// Any layer; set --table (GeoPackage) and --id-column/--name-column as needed.
+    Custom,
+    /// GADM 4.1 levels GeoPackage (use --level).
     Gadm,
     /// Natural Earth 1:10m Admin-0 (countries).
     NeAdmin0,
-    /// Natural Earth 1:10m Admin-1 (states/provinces).
+    /// Natural Earth 1:10m Admin-1 (states, provinces, départements).
     NeAdmin1,
 }
 
 #[derive(clap::Args)]
-struct RenderArgs {
-    /// GeoPackage to read from (see scripts/fetch-data.sh).
-    #[arg(long, conflicts_with = "geojson", required_unless_present = "geojson")]
-    gpkg: Option<PathBuf>,
+struct InputArgs {
+    /// Input file: GeoPackage (.gpkg) or GeoJSON (.geojson, .json).
+    #[arg(short, long)]
+    input: PathBuf,
 
-    /// Layout of the GeoPackage passed with --gpkg.
-    #[arg(long, value_enum, default_value = "gadm")]
+    /// Layout of the input file.
+    #[arg(long, value_enum, default_value = "custom")]
     dataset: Dataset,
 
-    /// Administrative level for GADM (0 = country, 1 = states, 2 = counties...).
+    /// GADM administrative level (0 = countries, 1 = states, 2 = counties...).
     #[arg(long, default_value_t = 1)]
     level: u8,
 
-    /// Region code to filter on, e.g. ISO 3166-1 alpha-3 `FRA`.
+    /// GeoPackage table (overrides the dataset preset).
     #[arg(long)]
-    region: Option<String>,
+    table: Option<String>,
 
-    /// GeoJSON FeatureCollection to read instead of a GeoPackage.
+    /// Column/property holding the id (overrides the dataset preset).
     #[arg(long)]
-    geojson: Option<PathBuf>,
+    id_column: Option<String>,
 
-    /// Output SVG path.
-    #[arg(short, long)]
-    out: PathBuf,
+    /// Column/property holding the display name, e.g. `name_fr` for Natural Earth.
+    #[arg(long)]
+    name_column: Option<String>,
 
+    /// Column/property that --region is compared against.
+    #[arg(long)]
+    filter_column: Option<String>,
+
+    /// Neighbouring countries for context: Natural Earth Admin-0 (.gpkg or .geojson).
+    #[arg(long)]
+    context: Option<PathBuf>,
+
+    /// Lakes: Natural Earth lakes (.gpkg or .geojson).
+    #[arg(long)]
+    lakes: Option<PathBuf>,
+}
+
+impl InputArgs {
+    fn query(&self) -> LayerQuery {
+        let mut q = match self.dataset {
+            Dataset::Custom => LayerQuery {
+                table: None,
+                id_columns: vec!["id".into()],
+                name_column: "name".into(),
+                filter_column: None,
+                class: "region".into(),
+            },
+            Dataset::Gadm => Source::Gadm { level: self.level }.layer_query(),
+            Dataset::NeAdmin0 => Source::NaturalEarthAdmin0.layer_query(),
+            Dataset::NeAdmin1 => Source::NaturalEarthAdmin1.layer_query(),
+        };
+        if let Some(t) = &self.table {
+            q.table = Some(t.clone());
+        }
+        if let Some(c) = &self.id_column {
+            q.id_columns = vec![c.clone()];
+        }
+        if let Some(c) = &self.name_column {
+            q.name_column = c.clone();
+        }
+        if let Some(c) = &self.filter_column {
+            q.filter_column = Some(c.clone());
+        }
+        q
+    }
+
+    fn load_context(&self) -> Result<(Vec<MapFeature>, Vec<MapFeature>)> {
+        let load = |path: &Option<PathBuf>, source: Source| -> Result<Vec<MapFeature>> {
+            match path {
+                Some(p) => read_layer(p, &source.layer_query(), None)
+                    .with_context(|| format!("reading {}", p.display())),
+                None => Ok(Vec::new()),
+            }
+        };
+        Ok((
+            load(&self.context, Source::NaturalEarthAdmin0)?,
+            load(&self.lakes, Source::NaturalEarthLakes)?,
+        ))
+    }
+}
+
+#[derive(clap::Args)]
+struct StyleArgs {
+    /// Colour theme (see `mapgen themes`).
+    #[arg(long, default_value = "wikimedia", value_parser = clap::builder::PossibleValuesParser::new(Theme::NAMES))]
+    theme: String,
+    /// Canvas colour (visible in padding, around world maps, or through `--water none`).
+    #[arg(long)]
+    background: Option<Color>,
+    /// Sea and lakes.
+    #[arg(long)]
+    water: Option<Color>,
+    /// The mapped regions.
+    #[arg(long, visible_alias = "earth")]
+    land: Option<Color>,
+    /// Neighbouring countries.
+    #[arg(long)]
+    context_land: Option<Color>,
+    /// Borders between mapped regions.
+    #[arg(long)]
+    border: Option<Color>,
+    #[arg(long)]
+    context_border: Option<Color>,
+    #[arg(long)]
+    lake_border: Option<Color>,
+    #[arg(long)]
+    label_color: Option<Color>,
+    #[arg(long)]
+    border_width: Option<f64>,
+    #[arg(long)]
+    context_border_width: Option<f64>,
+    #[arg(long)]
+    label_size: Option<f64>,
+    /// Draw region names.
+    #[arg(long)]
+    labels: bool,
+    /// Emit colours as CSS custom properties (`var(--mg-water, …)`) so a web
+    /// page can restyle an inline SVG.
+    #[arg(long)]
+    css_vars: bool,
+}
+
+impl StyleArgs {
+    fn theme(&self) -> Theme {
+        let mut t = Theme::builtin(&self.theme).expect("validated by clap");
+        let set = |slot: &mut Color, v: &Option<Color>| {
+            if let Some(v) = v {
+                *slot = v.clone();
+            }
+        };
+        set(&mut t.background, &self.background);
+        set(&mut t.water, &self.water);
+        set(&mut t.land, &self.land);
+        set(&mut t.context_land, &self.context_land);
+        set(&mut t.border, &self.border);
+        set(&mut t.context_border, &self.context_border);
+        set(&mut t.lake_border, &self.lake_border);
+        set(&mut t.label, &self.label_color);
+        t.border_width = self.border_width.unwrap_or(t.border_width);
+        t.context_border_width = self.context_border_width.unwrap_or(t.context_border_width);
+        t.label_size = self.label_size.unwrap_or(t.label_size);
+        t
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum FrameArg {
+    /// Main landmass; far overseas territories are left out.
+    Auto,
+    /// Every feature.
+    All,
+    /// The whole globe (Equal Earth).
+    World,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum ProjectionArg {
+    Auto,
+    Laea,
+    EqualEarth,
+}
+
+#[derive(clap::Args)]
+struct LayoutArgs {
     /// Output width in pixels.
     #[arg(long, default_value_t = 1000)]
     width: u32,
-
+    /// Margin in pixels, painted in the background colour.
+    #[arg(long, default_value_t = 0)]
+    padding: u32,
     /// Simplification tolerance in pixels (0 disables).
     #[arg(long, default_value_t = 0.5)]
     simplify: f64,
+    /// Drop islands/lakes smaller than this many square pixels.
+    #[arg(long, default_value_t = 0.5)]
+    min_area: f64,
+    /// Decimal places in path coordinates.
+    #[arg(long, default_value_t = 1)]
+    precision: usize,
+    #[arg(long, value_enum, default_value = "auto")]
+    frame: FrameArg,
+    /// Fixed frame: `west,south,east,north` or a preset (see `mapgen themes`).
+    #[arg(long, allow_hyphen_values = true)]
+    bbox: Option<String>,
+    /// Room around the framed features, as a fraction of the frame size.
+    #[arg(long, default_value_t = 0.04)]
+    margin: f64,
+    #[arg(long, value_enum, default_value = "auto")]
+    projection: ProjectionArg,
+    /// Central meridian override (e.g. 150 for a Pacific-centred world map).
+    #[arg(long, allow_hyphen_values = true)]
+    center_lon: Option<f64>,
+}
 
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum OutputFormat {
+    /// Pick from the output file extension.
+    Auto,
+    Svg,
+    /// Standalone page with the map inline and live colour pickers.
+    Html,
+}
+
+#[derive(clap::Args)]
+struct RenderArgs {
+    #[command(flatten)]
+    input: InputArgs,
+    /// Region code to keep, compared against the filter column (e.g. `FRA`).
+    #[arg(long)]
+    region: Option<String>,
+    /// Natural Earth continent name (e.g. `Europe`, `South America`); implies
+    /// `--filter-column CONTINENT` and a matching frame preset.
+    #[arg(long, conflicts_with = "region")]
+    continent: Option<String>,
+    /// Output file (.svg or .html).
+    #[arg(short, long)]
+    out: PathBuf,
+    #[arg(long, value_enum, default_value = "auto")]
+    format: OutputFormat,
     /// Document title.
     #[arg(long)]
     title: Option<String>,
+    #[command(flatten)]
+    style: StyleArgs,
+    #[command(flatten)]
+    layout: LayoutArgs,
+}
+
+#[derive(clap::Args)]
+struct BatchArgs {
+    #[command(flatten)]
+    input: InputArgs,
+    /// Directory to write one file per region into.
+    #[arg(long)]
+    out_dir: PathBuf,
+    /// Only these region codes (comma-separated); default: every value of the filter column.
+    #[arg(long, value_delimiter = ',')]
+    regions: Option<Vec<String>>,
+    #[arg(long, value_enum, default_value = "svg")]
+    format: OutputFormat,
+    #[command(flatten)]
+    style: StyleArgs,
+    #[command(flatten)]
+    layout: LayoutArgs,
 }
 
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Render(args) => run_render(args),
+        Command::Batch(args) => run_batch(args),
+        Command::Themes => {
+            print_themes();
+            Ok(())
+        }
+    }
+}
+
+fn options(
+    style: &StyleArgs,
+    layout: &LayoutArgs,
+    title: Option<String>,
+    html: bool,
+) -> Result<RenderOptions> {
+    let frame = match (&layout.bbox, layout.frame) {
+        (Some(b), _) => FrameMode::BBox(GeoBBox::parse(b)?),
+        (None, FrameArg::Auto) => FrameMode::Auto,
+        (None, FrameArg::All) => FrameMode::All,
+        (None, FrameArg::World) => FrameMode::World,
+    };
+    Ok(RenderOptions {
+        width: layout.width,
+        padding: layout.padding,
+        precision: layout.precision,
+        title,
+        theme: style.theme(),
+        css_vars: style.css_vars || html,
+        labels: style.labels,
+        simplify_px: layout.simplify,
+        min_area_px: layout.min_area,
+        projection: match layout.projection {
+            ProjectionArg::Auto => ProjectionChoice::Auto,
+            ProjectionArg::Laea => ProjectionChoice::Laea,
+            ProjectionArg::EqualEarth => ProjectionChoice::EqualEarth,
+        },
+        frame,
+        margin: layout.margin,
+        center_lon: layout.center_lon,
+    })
+}
+
+/// Context layer minus the countries being mapped.
+fn context_for(
+    all: &[MapFeature],
+    subject: &[MapFeature],
+    region: Option<&str>,
+) -> Vec<MapFeature> {
+    all.iter()
+        .filter(|c| Some(c.id.as_str()) != region && !subject.iter().any(|s| s.id == c.id))
+        .cloned()
+        .collect()
+}
+
+fn is_html(format: OutputFormat, out: &Path) -> bool {
+    match format {
+        OutputFormat::Html => true,
+        OutputFormat::Svg => false,
+        OutputFormat::Auto => out
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("html")),
     }
 }
 
 fn run_render(args: RenderArgs) -> Result<()> {
-    let features = if let Some(path) = &args.geojson {
-        mapgen_data::geojson::read_features(path, "id", "name", "subdivision")
-            .with_context(|| format!("reading {}", path.display()))?
-    } else if let Some(path) = &args.gpkg {
-        let source = match args.dataset {
-            Dataset::Gadm => Source::Gadm { level: args.level },
-            Dataset::NeAdmin0 => Source::NaturalEarthAdmin0,
-            Dataset::NeAdmin1 => Source::NaturalEarthAdmin1,
-        };
-        mapgen_data::gpkg::read_features(path, &source.layer_query(), args.region.as_deref())
-            .with_context(|| format!("reading {}", path.display()))?
+    let mut query = args.input.query();
+    let mut layout = args.layout;
+    let region = if let Some(continent) = &args.continent {
+        query.filter_column = Some("CONTINENT".into());
+        if layout.bbox.is_none()
+            && matches!(layout.frame, FrameArg::Auto)
+            && GeoBBox::parse(continent).is_ok()
+        {
+            layout.bbox = Some(continent.clone());
+        }
+        Some(continent.clone())
     } else {
-        unreachable!("clap requires --gpkg or --geojson");
+        args.region.clone()
     };
-    if features.is_empty() {
-        bail!("no features matched region {:?}", args.region);
+    if region.is_some() && query.filter_column.is_none() {
+        bail!("--region needs a filter column: pass --filter-column or a --dataset preset");
     }
 
-    let opts = RenderOptions {
-        svg: SvgOptions {
-            width: args.width,
-            title: args.title,
-            ..SvgOptions::default()
-        },
-        simplify_px: args.simplify,
+    let subject = read_layer(&args.input.input, &query, region.as_deref())
+        .with_context(|| format!("reading {}", args.input.input.display()))?;
+    if subject.is_empty() {
+        bail!(
+            "no features matched region {:?}",
+            region.unwrap_or_default()
+        );
+    }
+    let (context, lakes) = args.input.load_context()?;
+    let context = context_for(&context, &subject, region.as_deref());
+
+    let html = is_html(args.format, &args.out);
+    let opts = options(&args.style, &layout, args.title.clone(), html)?;
+    let layers = MapLayers {
+        subject,
+        context,
+        lakes,
     };
-    let svg = render(&features, &opts)?;
-    std::fs::write(&args.out, &svg).with_context(|| format!("writing {}", args.out.display()))?;
+    let rendered = render(&layers, &opts)?;
+    let body = if html {
+        to_html(&rendered.svg, &args.out, args.title.as_deref(), &opts.theme)
+    } else {
+        rendered.svg
+    };
+    std::fs::write(&args.out, &body).with_context(|| format!("writing {}", args.out.display()))?;
+
     eprintln!(
-        "wrote {} ({} features, {} bytes)",
+        "wrote {} ({}×{} px, {} regions, {} bytes, {:?})",
         args.out.display(),
-        features.len(),
-        svg.len()
+        rendered.width,
+        rendered.height,
+        layers.subject.len() - rendered.outside_frame.len(),
+        body.len(),
+        rendered.projection,
     );
+    if !rendered.outside_frame.is_empty() {
+        eprintln!(
+            "note: {} region(s) outside the frame were left out: {} (use --frame all to include them)",
+            rendered.outside_frame.len(),
+            rendered.outside_frame.join(", ")
+        );
+    }
     Ok(())
+}
+
+fn to_html(svg: &str, out: &Path, title: Option<&str>, theme: &Theme) -> String {
+    let stem = out.file_stem().and_then(|s| s.to_str()).unwrap_or("map");
+    html_page(svg, title.unwrap_or(stem), theme, &format!("{stem}.svg"))
+}
+
+fn run_batch(args: BatchArgs) -> Result<()> {
+    let path = &args.input.input;
+    let query = args.input.query();
+    let regions = match &args.regions {
+        Some(r) => r.clone(),
+        None => list_regions(path, &query)
+            .with_context(|| format!("listing regions in {}", path.display()))?,
+    };
+    // GeoJSON has no index, so read it once; GeoPackages are queried per region.
+    let grouped = match Format::of(path)? {
+        Format::GeoJson => Some(read_grouped(path, &query)?),
+        Format::GeoPackage => None,
+    };
+    let (context, lakes) = args.input.load_context()?;
+    std::fs::create_dir_all(&args.out_dir)?;
+    let html = args.format == OutputFormat::Html;
+    let ext = if html { "html" } else { "svg" };
+
+    let results: Vec<(String, Result<usize>)> = regions
+        .par_iter()
+        .map(|code| {
+            let job = || -> Result<usize> {
+                let subject = match &grouped {
+                    Some(g) => g.get(code).cloned().unwrap_or_default(),
+                    None => read_layer(path, &query, Some(code))?,
+                };
+                if subject.is_empty() {
+                    bail!("no features");
+                }
+                let layers = MapLayers {
+                    context: context_for(&context, &subject, Some(code)),
+                    lakes: lakes.clone(),
+                    subject,
+                };
+                let opts = options(&args.style, &args.layout, Some(code.clone()), html)?;
+                let rendered = render(&layers, &opts)?;
+                let out = args.out_dir.join(format!("{}.{ext}", file_safe(code)));
+                let body = if html {
+                    to_html(&rendered.svg, &out, Some(code), &opts.theme)
+                } else {
+                    rendered.svg
+                };
+                std::fs::write(&out, &body)?;
+                Ok(body.len())
+            };
+            (code.clone(), job())
+        })
+        .collect();
+
+    let mut ok = 0;
+    for (code, r) in &results {
+        match r {
+            Ok(_) => ok += 1,
+            Err(e) => eprintln!("{code}: {e:#}"),
+        }
+    }
+    eprintln!(
+        "rendered {ok}/{} maps into {}",
+        results.len(),
+        args.out_dir.display()
+    );
+    if ok == 0 && !results.is_empty() {
+        bail!("every map failed");
+    }
+    Ok(())
+}
+
+fn file_safe(code: &str) -> String {
+    code.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "-_.".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn print_themes() {
+    for name in Theme::NAMES {
+        let t = Theme::builtin(name).expect("built-in");
+        println!("{name}");
+        for (slot, color) in t.colors() {
+            println!("  {slot:<15} {color}");
+        }
+    }
+    println!("\nframe presets (--bbox):");
+    for (name, b) in BBOX_PRESETS {
+        println!("  {name:<14} {},{},{},{}", b.west, b.south, b.east, b.north);
+    }
 }

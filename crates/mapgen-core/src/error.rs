@@ -5,6 +5,10 @@ pub enum Error {
     Empty,
     #[error("projected extent is degenerate (zero width or height)")]
     DegenerateExtent,
+    #[error("invalid colour {0:?}")]
+    InvalidColor(String),
+    #[error("invalid bounding box {0:?}: expected `west,south,east,north` or a preset ({1})")]
+    InvalidBBox(String, String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
