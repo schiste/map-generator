@@ -1,0 +1,2 @@
+# Golden SVGs and examples are compared byte-for-byte; never convert line endings.
+* text=auto eol=lf
