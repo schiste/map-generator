@@ -24,6 +24,8 @@ pub struct LayerQuery {
     pub parent_name_column: Option<String>,
     /// Column holding the country, as ISO 3166-1 alpha-2 or alpha-3.
     pub country_column: Option<String>,
+    /// Column holding the Wikidata item (`Q142`).
+    pub wikidata_column: Option<String>,
     /// Column with a note appended to the name ("Jammu and Kashmir — Admin.
     /// by India; Claimed by Pakistan").
     pub note_column: Option<String>,
@@ -47,6 +49,14 @@ impl LayerQuery {
             .map(|l| (l.clone(), language_column(pattern, l)))
             .collect()
     }
+}
+
+/// A Wikidata item id (`Q42`), normalised; anything else is `None`.
+pub fn wikidata_id(value: &str) -> Option<String> {
+    let v = value.trim();
+    let digits = v.strip_prefix(['Q', 'q'])?;
+    (!digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) && !digits.starts_with('0'))
+        .then(|| format!("Q{digits}"))
 }
 
 /// The column for a language: `{lang}` in `pattern` becomes the tag's
@@ -140,6 +150,7 @@ impl Source {
             // `ISO_A2_EH` fills in France's and Norway's codes, which `ISO_A2` lacks.
             Source::NaturalEarthAdmin0 => LayerQuery {
                 country_column: Some("ISO_A2_EH".into()),
+                wikidata_column: Some("WIKIDATAID".into()),
                 name_language_column: Some("NAME_{lang}".into()),
                 ..q(
                     "ne_10m_admin_0_countries".into(),
@@ -154,6 +165,7 @@ impl Source {
                 parent_column: Some("region_cod".into()),
                 parent_name_column: Some("region".into()),
                 country_column: Some("iso_a2".into()),
+                wikidata_column: Some("wikidataid".into()),
                 name_language_column: Some("name_{lang}".into()),
                 ..q(
                     "ne_10m_admin_1_states_provinces".into(),
@@ -328,7 +340,16 @@ pub(crate) fn meaningful(v: Option<String>) -> Option<String> {
 
 #[cfg(test)]
 mod language_tests {
-    use super::language_column;
+    use super::{language_column, wikidata_id};
+
+    #[test]
+    fn wikidata_ids_are_normalised() {
+        assert_eq!(wikidata_id("Q142").as_deref(), Some("Q142"));
+        assert_eq!(wikidata_id(" q90 ").as_deref(), Some("Q90"));
+        for bad in ["", "Q", "Q0", "Q012", "142", "-99", "Qx1"] {
+            assert_eq!(wikidata_id(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn language_columns_follow_natural_earth() {

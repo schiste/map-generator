@@ -168,6 +168,7 @@ pub fn dissolve(features: Vec<MapFeature>, rows: &[UnitRow]) -> Vec<MapFeature> 
             parent_name: same(|m| &m.parent_name),
             country: same(|m| &m.country),
             units: vec![unit.clone()],
+            wikidata: None,
             geometry: MultiPolygon(members.into_iter().flat_map(|m| m.geometry.0).collect()),
             id: unit,
         });

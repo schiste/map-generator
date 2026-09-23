@@ -229,6 +229,7 @@ impl Registry {
                         let mut aliases: Vec<String> = f
                             .names
                             .values()
+                            .chain(f.wikidata.as_ref())
                             .map(|a| a.to_lowercase())
                             .chain(iso2)
                             .collect();

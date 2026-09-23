@@ -70,6 +70,8 @@ pub struct LayerSpec {
     /// Property with the country (ISO 3166-1 alpha-2 or alpha-3), emitted as
     /// a lowercase alpha-2 class for colouring tools like Maphue.
     pub country_property: Option<String>,
+    /// Property with the Wikidata item (`Q142`), emitted as `data-wikidata`.
+    pub wikidata_property: Option<String>,
     /// Languages to read names in (BCP 47 tags), for `RenderSpec.languages`.
     #[serde(default)]
     pub languages: Vec<String>,
@@ -126,6 +128,9 @@ impl LayerSpec {
         }
         if let Some(p) = &self.country_property {
             q.country_column = Some(p.clone());
+        }
+        if let Some(p) = &self.wikidata_property {
+            q.wikidata_column = Some(p.clone());
         }
         if let Some(p) = &self.name_language_property {
             q.name_language_column = Some(p.clone());
@@ -279,7 +284,10 @@ impl LoadedLayer {
         let mut iso2_owner: BTreeMap<String, (f64, String)> = BTreeMap::new();
         for layer in [Some(self), countries].into_iter().flatten() {
             for f in layer.features().filter(|f| known.contains(f.id.as_str())) {
-                for key in std::iter::once(&f.name).chain(f.names.values()) {
+                for key in std::iter::once(&f.name)
+                    .chain(f.names.values())
+                    .chain(f.wikidata.as_ref())
+                {
                     lookup.entry(norm(key)).or_insert_with(|| f.id.clone());
                 }
                 if let Some(iso2) = &f.country {

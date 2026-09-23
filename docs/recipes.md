@@ -35,7 +35,8 @@ projection,laea
   [`/api/v1/datasets`](https://map-generator.toolforge.org/api/v1/datasets), e.g. `us-counties` or
   `geoboundaries-adm1`.
 - **`region`**, one row per region: a code (`FRA`), a name (`France`, or a name in another
-  loaded language) or an ISO 3166-1 alpha-2 code (`fr`). You can also write them in one row:
+  language), an ISO 3166-1 alpha-2 code (`fr`) or a Wikidata item (`Q142`), as the
+  Choropleth map template takes them. You can also write them in one row:
   `regions,France;DEU;Italy`. For `subdivisions`, the regions are the countries whose
   subdivisions are drawn.
 - **`worldview`**: a Natural Earth point of view for disputed borders, e.g. `IND` (API only).

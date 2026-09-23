@@ -48,6 +48,7 @@ or an inset's `.mg-land`, with:
 | `data-parent` | code of the enclosing unit (`FR-IDF`, `US-31`), when known |
 | `data-parent-name` | its name, when known (only together with `data-parent`) |
 | `data-unit` | space-separated data units the region belongs to, when set |
+| `data-wikidata` | the region's Wikidata item (`Q142`), when known (Natural Earth layers) |
 | `class` | `mg-land`, the feature class (`subdivision`, `country`, `region`…), and the lowercase ISO 3166-1 alpha-2 code of its country (`fr`) when known |
 
 Each region has a `<title>` child for tooltips ("Lancaster, Nebraska").

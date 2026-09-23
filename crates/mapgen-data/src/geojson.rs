@@ -18,6 +18,7 @@ struct RawFeature {
     parent: Option<String>,
     parent_name: Option<String>,
     country: Option<String>,
+    wikidata: Option<String>,
     geometry: Geometry<f64>,
 }
 
@@ -45,6 +46,7 @@ pub fn rows_from_str(text: &str, query: &LayerQuery) -> Result<Vec<(Option<Strin
                 parent: r.parent,
                 country: r.country.as_deref().and_then(crate::iso::country_alpha2),
                 units: Vec::new(),
+                wikidata: r.wikidata,
                 geometry: into_multipolygon(r.geometry),
             };
             (r.filter, feature)
@@ -158,6 +160,11 @@ fn raw_features(text: &str, query: &LayerQuery) -> Result<Vec<RawFeature>> {
                 parent: query.parent_column.as_deref().and_then(|c| r.prop(c)),
                 parent_name: query.parent_name_column.as_deref().and_then(|c| r.prop(c)),
                 country: query.country_column.as_deref().and_then(|c| r.prop(c)),
+                wikidata: query
+                    .wikidata_column
+                    .as_deref()
+                    .and_then(|c| r.prop(c))
+                    .and_then(|v| crate::layer::wikidata_id(&v)),
                 names: languages
                     .iter()
                     .filter_map(|(lang, c)| r.prop(c).map(|n| (lang.clone(), n)))

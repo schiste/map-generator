@@ -51,6 +51,7 @@ pub fn read_features_in(
         &query.parent_name_column,
         &query.country_column,
         &query.note_column,
+        &query.wikidata_column,
     ] {
         match optional.as_deref().filter(|c| has(c)) {
             Some(c) => select.push(ident(c)?),
@@ -95,7 +96,7 @@ pub fn read_features_in(
     let n = id_cols.len();
     let mut features = Vec::new();
     while let Some(row) = rows.next()? {
-        let Some(blob) = row.get::<_, Option<Vec<u8>>>(n + 5)? else {
+        let Some(blob) = row.get::<_, Option<Vec<u8>>>(n + 6)? else {
             continue;
         };
         let ids = (0..n).map(|i| row.get::<_, Value>(i).map(value_to_string));
@@ -117,12 +118,14 @@ pub fn read_features_in(
             .and(meaningful(value_to_string(row.get(n + 2)?)));
         let country = meaningful(value_to_string(row.get(n + 3)?))
             .and_then(|c| crate::iso::country_alpha2(&c));
+        let wikidata = meaningful(value_to_string(row.get(n + 5)?))
+            .and_then(|v| crate::layer::wikidata_id(&v));
         let Some(id) = id.or_else(|| name.clone()) else {
             continue;
         };
         let mut names = std::collections::BTreeMap::new();
         for (k, (lang, _)) in languages.iter().enumerate() {
-            if let Some(v) = meaningful(value_to_string(row.get(n + 6 + k)?)) {
+            if let Some(v) = meaningful(value_to_string(row.get(n + 7 + k)?)) {
                 names.insert(lang.clone(), v);
             }
         }
@@ -136,6 +139,7 @@ pub fn read_features_in(
             parent_name,
             country,
             units: Vec::new(),
+            wikidata,
             geometry,
         });
     }

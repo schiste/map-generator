@@ -120,6 +120,11 @@ pub(crate) struct InputArgs {
     #[arg(long)]
     country_column: Option<String>,
 
+    /// Column/property with the Wikidata item (`Q142`), emitted as
+    /// `data-wikidata` (Natural Earth presets: set).
+    #[arg(long)]
+    wikidata_column: Option<String>,
+
     /// Neighbouring countries for context: Natural Earth Admin-0 (.gpkg or .geojson).
     #[arg(long)]
     context: Option<PathBuf>,
@@ -218,6 +223,9 @@ impl InputArgs {
         }
         if let Some(c) = &self.country_column {
             q.country_column = Some(c.clone());
+        }
+        if let Some(c) = &self.wikidata_column {
+            q.wikidata_column = Some(c.clone());
         }
         if let Some(c) = &self.name_language_column {
             q.name_language_column = Some(c.clone());

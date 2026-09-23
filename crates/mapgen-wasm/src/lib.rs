@@ -42,6 +42,8 @@ export interface LayerSpec {
   parentNameProperty?: string;
   /** Property with the country (ISO alpha-2 or alpha-3), emitted as a lowercase alpha-2 class (Maphue). */
   countryProperty?: string;
+  /** Property with the Wikidata item (e.g. "Q142"), emitted as data-wikidata (Natural Earth presets: set). */
+  wikidataProperty?: string;
   /** Languages to read names in (BCP 47 tags, e.g. ["fr", "zh-Hant"]), for RenderSpec.languages. */
   languages?: string[];
   /** Property with names in other languages, "{lang}" standing for the language (Natural Earth: "NAME_{lang}"). */
@@ -165,6 +167,8 @@ export interface Country {
   name: string;
   /** Lowercase ISO 3166-1 alpha-2, when known. */
   iso2?: string;
+  /** Wikidata item, e.g. "Q142", when known. */
+  wikidata?: string;
   /** Names in the languages read (LayerSpec.languages). */
   names: Record<string, string>;
 }
@@ -591,7 +595,7 @@ pub fn recipe_to_csv(
 }
 
 fn country_json(f: &mapgen_core::MapFeature) -> serde_json::Value {
-    serde_json::json!({ "code": f.id, "name": f.name, "iso2": f.country, "names": f.names })
+    serde_json::json!({ "code": f.id, "name": f.name, "iso2": f.country, "wikidata": f.wikidata, "names": f.names })
 }
 
 /// Library version.

@@ -232,13 +232,17 @@ test("custom maps: several countries, picked by name", { skip: skipUnless(hasNE)
   const gen = withContext(ne.admin0, { dataset: "ne-admin0" });
   const countries = gen.countries();
   assert.ok(countries.length > 200);
-  assert.deepEqual(countries.find((c) => c.code === "FRA"), { code: "FRA", name: "France", iso2: "fr", names: {} });
+  assert.deepEqual(countries.find((c) => c.code === "FRA"), { code: "FRA", name: "France", iso2: "fr", wikidata: "Q142", names: {} });
   const { codes, unknown } = gen.resolveRegions(["France", "de", "ITA", "Atlantis", "france"]);
   assert.deepEqual([codes, unknown], [["FRA", "DEU", "ITA"], ["Atlantis"]]);
   // Clipperton, Baikonur, Brazilian Island and Australian territories share
   // their country's ISO-2 code: the country wins.
   assert.deepEqual(gen.resolveRegions(["fr", "kz", "br", "au"]).codes, ["FRA", "KAZ", "BRA", "AUS"]);
+  // Wikidata items, as the Choropleth map template takes them.
+  assert.deepEqual(gen.resolveRegions(["Q142", "q183"]).codes, ["FRA", "DEU"]);
+  assert.equal(countries.find((c) => c.code === "FRA").wikidata, "Q142");
   const out = gen.render({ regions: codes, width: 600, labels: true });
+  assert.match(out.svg, /<path id="DEU" class="mg-land country de"[^>]* data-wikidata="Q183"/);
   for (const c of codes) assert.match(out.svg, new RegExp(`<path id="${c}" class="mg-land`));
   assert.doesNotMatch(out.svg, /<path id="ESP" class="mg-land/);
   assert.match(out.svg, /<path id="ESP" class="mg-context/);

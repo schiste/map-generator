@@ -355,6 +355,11 @@ fn path_element(id: &str, layer_class: &str, f: &MapFeature, d: &str) -> String 
         .and(f.parent_name.as_deref())
         .map(|p| format!(" data-parent-name=\"{}\"", escape(p)))
         .unwrap_or_default();
+    let wikidata = f
+        .wikidata
+        .as_deref()
+        .map(|q| format!(" data-wikidata=\"{}\"", escape(q)))
+        .unwrap_or_default();
     let units = if f.units.is_empty() {
         String::new()
     } else {
@@ -365,7 +370,7 @@ fn path_element(id: &str, layer_class: &str, f: &MapFeature, d: &str) -> String 
         _ => f.name.clone(),
     };
     format!(
-        "<path id=\"{}\" class=\"{}\" data-name=\"{}\" data-code=\"{}\"{parent}{parent_name}{units} d=\"{d}\"><title>{}</title></path>",
+        "<path id=\"{}\" class=\"{}\" data-name=\"{}\" data-code=\"{}\"{parent}{parent_name}{units}{wikidata} d=\"{d}\"><title>{}</title></path>",
         escape(id),
         escape(&classes.join(" ")),
         escape(&f.name),

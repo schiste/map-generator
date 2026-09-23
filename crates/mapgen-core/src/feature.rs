@@ -27,6 +27,8 @@ pub struct MapFeature {
     pub country: Option<String>,
     /// Data units the feature belongs to (`data-unit`), see `units`.
     pub units: Vec<String>,
+    /// Wikidata item, e.g. `Q142` (`data-wikidata`).
+    pub wikidata: Option<String>,
     pub geometry: MultiPolygon<f64>,
 }
 
@@ -41,6 +43,7 @@ impl Default for MapFeature {
             parent_name: None,
             country: None,
             units: Vec::new(),
+            wikidata: None,
             geometry: MultiPolygon(vec![]),
         }
     }
