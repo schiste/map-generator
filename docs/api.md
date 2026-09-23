@@ -133,8 +133,8 @@ width limit.)
   comma-separated numbers). `widget`: `checkbox`, `select`, `number`, `text`, `textarea`,
   `tokens`, `bbox` or `pair`.
 - `choices` are the only values accepted; `choicesSource` names the endpoint that lists them
-  (`/themes`, `/bbox-presets`, `/datasets` for points of view); `suggestions` are common values
-  of an open list (`languages`).
+  (`/themes`, `/bbox-presets`); `suggestions` are common values of an open list (`languages`).
+  `worldview`'s choices are the points of view this host has, named after their country.
 - `minimum`, `exclusiveMinimum`, `maximum`, `step` and `maxLength` are the limits the API
   enforces (`step` is a hint). `width`'s maximum is this host's.
 - `visibleWhen` says when a setting applies: `{option, equals}`, `{option, in}`,

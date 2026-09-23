@@ -289,6 +289,30 @@ impl Registry {
         })
     }
 
+    /// The Natural Earth points of view hosted (`ne_10m_admin_0_<view>`
+    /// next to the countries), with the country each is named after.
+    pub fn worldviews(&self) -> Vec<(String, String)> {
+        let Some(file) = &self.countries_file else {
+            return Vec::new();
+        };
+        mapgen_data::NATURAL_EARTH_WORLDVIEWS
+            .iter()
+            .filter(|v| mapgen_data::worldview_path(file, v).is_ok_and(|p| p.exists()))
+            .map(|v| {
+                let name = self
+                    .countries
+                    .as_ref()
+                    .and_then(|c| c.features().find(|f| f.id == *v).map(|f| f.name.clone()));
+                let label = match (*v, name) {
+                    ("ISO", _) => "ISO 3166".to_owned(),
+                    (_, Some(name)) => format!("{name} ({v})"),
+                    (_, None) => (*v).to_owned(),
+                };
+                ((*v).to_owned(), label)
+            })
+            .collect()
+    }
+
     /// Neighbouring countries, in Natural Earth's point of view `view`
     /// (`None`: de facto).
     pub fn countries_for(&self, view: Option<&str>) -> Result<Option<Arc<LoadedLayer>>> {

@@ -603,6 +603,11 @@ async fn regions_by_iso2_and_names_in_other_languages() {
         ),
     )
     .unwrap();
+    std::fs::copy(
+        dir.join("countries.geojson"),
+        dir.join("countries_deu.geojson"),
+    )
+    .unwrap();
     std::fs::write(
         dir.join("capitals.geojson"),
         r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"FEATURECLA":"Admin-0 capital","NAME":"Berlin","NAME_FR":"Berlin","ADM0_A3":"DEU","WIKIDATAID":"Q64","NE_ID":1},"geometry":{"type":"Point","coordinates":[10.5,45.5]}}]}"#,
@@ -637,6 +642,19 @@ async fn regions_by_iso2_and_names_in_other_languages() {
             "{path}"
         );
     }
+    // Points of view: the ones hosted next to the countries.
+    let views = get(&app, "/api/v1/render-options").await.json();
+    let worldview = views["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["name"] == "worldview")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        worldview["choices"],
+        serde_json::json!([{ "value": "DEU", "label": "Germany (DEU)" }])
+    );
     let r = get(&app, "/api/v1/maps/countries/DEU.svg?capitals=countries").await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
     assert!(

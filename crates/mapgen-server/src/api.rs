@@ -271,9 +271,21 @@ async fn bbox_presets() -> Json<Value> {
     Json(json!(bbox_table()))
 }
 
-/// Every map setting, described for settings forms (`options.rs`).
+/// Every map setting, described for settings forms (`options.rs`), with
+/// this host's width limit and points of view.
 async fn render_options(State(s): St) -> Json<Value> {
-    Json(json!(mapgen_spec::options::describe(s.settings.max_width)))
+    let mut description = mapgen_spec::options::describe(s.settings.max_width);
+    let views = s
+        .registry
+        .worldviews()
+        .into_iter()
+        .map(|(code, label)| mapgen_spec::options::Choice {
+            value: json!(code),
+            label,
+        })
+        .collect();
+    description.set_choices("worldview", views);
+    Json(json!(description))
 }
 
 async fn contract_fixture() -> impl IntoResponse {

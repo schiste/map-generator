@@ -71,7 +71,7 @@ pub enum Condition {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Choice {
     pub value: Value,
-    pub label: &'static str,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -286,7 +286,7 @@ fn choices(values: &[(&str, &'static str)]) -> Vec<Choice> {
         .iter()
         .map(|(v, label)| Choice {
             value: json!(v),
-            label,
+            label: (*label).to_owned(),
         })
         .collect()
 }
@@ -437,7 +437,7 @@ pub fn options(max_width: u32) -> Vec<RenderOption> {
             description: "Also label in these languages (BCP 47 tags); viewers see their own.",
             suggestions: LANGUAGE_SUGGESTIONS
                 .iter()
-                .map(|(v, label)| Choice { value: json!(v), label })
+                .map(|(v, label)| Choice { value: json!(v), label: (*label).to_owned() })
                 .collect(),
             visible_when: Some(any_labels()),
             ..o("languages", List, W::Tokens, "labels", 40)
@@ -563,8 +563,7 @@ pub fn options(max_width: u32) -> Vec<RenderOption> {
         // Borders
         RenderOption {
             label: "Point of view",
-            description: "A Natural Earth point of view on disputed borders (country code). Default: de facto.",
-            choices_source: Some("/api/v1/datasets"),
+            description: "A Natural Earth point of view on disputed borders, applied to neighbouring countries (and to the regions of Natural Earth country maps). Default: de facto. The choices are the points of view this host has.",
             in_render_spec: false,
             ..o("worldview", String, W::Select, "borders", 10)
         },
@@ -694,6 +693,16 @@ pub fn color_slots() -> Vec<ColorSlot> {
             }
         })
         .collect()
+}
+
+impl Description {
+    /// Sets an option's choices (host-specific ones, such as the points of
+    /// view a server has).
+    pub fn set_choices(&mut self, name: &str, choices: Vec<Choice>) {
+        if let Some(o) = self.options.iter_mut().find(|o| o.name == name) {
+            o.choices = choices;
+        }
+    }
 }
 
 /// The whole description (`GET /api/v1/render-options`).
