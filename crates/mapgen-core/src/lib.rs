@@ -20,6 +20,7 @@ pub mod projection;
 pub mod simplify;
 pub mod svg;
 pub mod theme;
+pub mod validate;
 
 pub use error::{Error, Result};
 pub use feature::MapFeature;
