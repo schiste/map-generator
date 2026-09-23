@@ -603,7 +603,15 @@ async fn map_get(
             format!("{base}?{q}")
         }
     };
-    let key = Cache::key(&[VERSION, &id, &r.provenance.release, &canonical]);
+    // The build commit too: a dependency update can change output without
+    // changing the crate version.
+    let key = Cache::key(&[
+        VERSION,
+        COMMIT.unwrap_or("dev"),
+        &id,
+        &r.provenance.release,
+        &canonical,
+    ]);
     if let Some(body) = s.cache.get(&key) {
         return Ok(map_response(
             body,

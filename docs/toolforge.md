@@ -59,8 +59,8 @@ release ids in the licence sidecars), and `/api/v1/version` reports the release 
 - **Rollback.** Data: point `data/current` back at the previous release
   (`ln -sfn releases/<older> current.new && mv -Tf current.new current`), then restart. The
   three newest releases are kept. Code: `scripts/deploy-toolforge.sh --build <tag> --restart --apply`.
-- **Cache.** It is keyed by mapgen version and dataset release, so a new release or version
-  never serves stale maps. `rm -rf cache/*` is always safe.
+- **Cache.** It is keyed by mapgen version, build commit and dataset release, so a new deploy
+  or data release never serves stale maps. `rm -rf cache/*` is always safe.
 - **Resources.** `toolforge webservice buildservice status`. If renders queue, raise `cpu`/`mem`
   in `toolforge/service.template` (within the tool's quota) and `MAPGEN_MAX_CONCURRENT`.
 

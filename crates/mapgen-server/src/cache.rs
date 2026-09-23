@@ -1,6 +1,6 @@
 //! A bounded on-disk cache of rendered maps. Output is deterministic, so an
 //! entry is valid for as long as the mapgen version and the dataset release
-//! it was made with, which are part of the key.
+//! it was made with, and the build commit, which are all part of the key.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
