@@ -140,6 +140,7 @@ async fn discovery_endpoints() {
     let v = get(&app, "/api/v1/version").await.json();
     assert_eq!(v["contract"], 1);
     assert_eq!(v["datasets"]["twin"], "2024-01");
+    assert_eq!(v["datasets"]["twin-files"], "per region");
     let ds = get(&app, "/api/v1/datasets").await.json();
     assert_eq!(ds.as_array().unwrap().len(), 2);
     assert_eq!(ds[0]["licence"], "CC0");

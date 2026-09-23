@@ -42,6 +42,11 @@ scripts/deploy-toolforge.sh --www --apply
 scripts/warm-cache.sh https://map-generator.toolforge.org/api/v1
 ```
 
+There is deliberately no scheduled refresh job. The downloads are pinned, so new data means
+changing a pin in `scripts/fetch-data.sh` and deploying a new release as above. The server
+image also contains only the two binaries: no Python, curl or rsync for the preparation
+scripts. The webservice health check restarts the server if it stops answering.
+
 The data is reproducible: the downloads are pinned (Natural Earth commit, geoBoundaries
 release ids in the licence sidecars), and `/api/v1/version` reports the release of each dataset.
 

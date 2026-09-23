@@ -194,12 +194,16 @@ async fn version(State(s): St) -> Json<Value> {
         .datasets
         .iter()
         .map(|(id, d)| {
-            let r = d
-                .regions
-                .values()
-                .next()
-                .map(|r| r.provenance.release.clone())
-                .unwrap_or_default();
+            // One file per region: each has its own release (see /regions).
+            let r = if d.config.files.is_some() {
+                "per region".to_owned()
+            } else {
+                d.regions
+                    .values()
+                    .next()
+                    .map(|r| r.provenance.release.clone())
+                    .unwrap_or_default()
+            };
             (id.clone(), json!(r))
         })
         .collect();

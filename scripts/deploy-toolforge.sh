@@ -89,6 +89,7 @@ if [[ "$www" -eq 1 ]]; then
   echo "== playground"
   stage="$(mktemp -d)"
   trap 'rm -rf "$stage"' EXIT
+  chmod 755 "$stage"
   (cd "$here/crates/mapgen-wasm" && wasm-pack build --release --target web --out-dir www/pkg >/dev/null)
   cp -R "$here/crates/mapgen-wasm/www/." "$stage/"
   rm -f "$stage/pkg/.gitignore" "$stage/pkg/package.json" "$stage/pkg/README.md"
