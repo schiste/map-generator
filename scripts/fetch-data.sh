@@ -7,6 +7,7 @@
 #   scripts/fetch-data.sh geoboundaries FRA ADM2     # geoBoundaries gbOpen, one country/level
 #   scripts/fetch-data.sh geoboundaries FRA,DEU ADM1 --simplified
 #   scripts/fetch-data.sh geoboundaries ALL ADM1     # every country (large)
+#   scripts/fetch-data.sh us-counties-fips           # Census county codes (for convert --ids-from)
 #
 # geoBoundaries licences vary by country (public domain, CC BY, CC BY-SA,
 # ODbL, national open licences...). Each download gets a `.license.json`
@@ -36,6 +37,7 @@ case "${1:-}" in
     fetch "$base/ne_10m_admin_0_countries.geojson" "$DATA_DIR/ne_10m_admin_0.geojson"
     fetch "$base/ne_10m_admin_1_states_provinces.geojson" "$DATA_DIR/ne_10m_admin_1.geojson"
     fetch "$base/ne_10m_lakes.geojson" "$DATA_DIR/ne_10m_lakes.geojson"
+    fetch "$base/ne_10m_admin_0_boundary_lines_disputed_areas.geojson" "$DATA_DIR/ne_10m_disputed_lines.geojson"
     ls -1 "$DATA_DIR"/*.geojson
     ;;
   natural-earth)
@@ -93,8 +95,14 @@ for m in metas:
     print(f"{dest}  [{m['boundaryLicense']}; {m['boundarySource']}]")
 PY
     ;;
+  us-counties-fips)
+    # US Census county boundaries with 5-digit FIPS codes as feature ids
+    # (public-domain Census data, as packaged by plotly/datasets, MIT), pinned.
+    fetch "https://raw.githubusercontent.com/plotly/datasets/0c447c47b757ad74edecab31f0d72f849d2e67c2/geojson-counties-fips.json" \
+      "$DATA_DIR/us-counties-fips.geojson"
+    ;;
   *)
-    echo "usage: $0 {ne-geojson|natural-earth|geoboundaries ISO3 LEVEL}" >&2
+    echo "usage: $0 {ne-geojson|natural-earth|geoboundaries ISO3 LEVEL|us-counties-fips}" >&2
     exit 1
     ;;
 esac
