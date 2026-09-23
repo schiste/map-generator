@@ -273,16 +273,26 @@ impl LoadedLayer {
         let norm = |s: &str| s.trim().to_lowercase();
         let mut lookup: BTreeMap<String, String> = BTreeMap::new();
         // A feature names a region when its id is that region's code:
-        // countries in a layer of countries, or in `countries`.
+        // countries in a layer of countries, or in `countries`. Territories
+        // can share their country's ISO-2 code (Clipperton is `FR`): the
+        // code goes to the largest of them, the country itself.
+        let mut iso2_owner: BTreeMap<String, (f64, String)> = BTreeMap::new();
         for layer in [Some(self), countries].into_iter().flatten() {
             for f in layer.features().filter(|f| known.contains(f.id.as_str())) {
                 for key in std::iter::once(&f.name).chain(f.names.values()) {
                     lookup.entry(norm(key)).or_insert_with(|| f.id.clone());
                 }
                 if let Some(iso2) = &f.country {
-                    lookup.entry(norm(iso2)).or_insert_with(|| f.id.clone());
+                    let area = geo::Area::unsigned_area(&f.geometry);
+                    let owner = iso2_owner.entry(norm(iso2)).or_insert((area, f.id.clone()));
+                    if area > owner.0 {
+                        *owner = (area, f.id.clone());
+                    }
                 }
             }
+        }
+        for (iso2, (_, code)) in iso2_owner {
+            lookup.entry(iso2).or_insert(code);
         }
         for code in &known {
             lookup.insert(norm(code), (*code).to_owned());

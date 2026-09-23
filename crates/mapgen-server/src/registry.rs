@@ -202,16 +202,35 @@ impl Registry {
             })
             .transpose()?;
 
+        // Territories can share their country's ISO-2 code (Clipperton is
+        // `FR`): the code goes to the largest of them, the country itself.
+        let mut iso2_owner: BTreeMap<String, (f64, String)> = BTreeMap::new();
+        for f in countries.iter().flat_map(|c| c.features()) {
+            if let Some(iso2) = &f.country {
+                let area = geo::Area::unsigned_area(&f.geometry);
+                let owner = iso2_owner
+                    .entry(iso2.to_lowercase())
+                    .or_insert((area, f.id.clone()));
+                if area > owner.0 {
+                    *owner = (area, f.id.clone());
+                }
+            }
+        }
         let names: BTreeMap<String, (String, Vec<String>)> = countries
             .as_ref()
             .map(|c| {
                 c.features()
                     .map(|f| {
+                        let iso2 = f
+                            .country
+                            .as_ref()
+                            .map(|c| c.to_lowercase())
+                            .filter(|c| iso2_owner.get(c).is_some_and(|(_, id)| *id == f.id));
                         let mut aliases: Vec<String> = f
                             .names
                             .values()
-                            .chain(f.country.as_ref())
                             .map(|a| a.to_lowercase())
+                            .chain(iso2)
                             .collect();
                         aliases.sort();
                         aliases.dedup();

@@ -926,6 +926,7 @@ name = "mapgen-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "geo",
  "http-body-util",
  "mapgen-core",
  "mapgen-data",
@@ -943,6 +944,7 @@ dependencies = [
 name = "mapgen-spec"
 version = "0.1.0"
 dependencies = [
+ "geo",
  "mapgen-core",
  "mapgen-data",
  "serde",

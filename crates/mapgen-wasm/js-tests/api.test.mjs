@@ -235,6 +235,9 @@ test("custom maps: several countries, picked by name", { skip: skipUnless(hasNE)
   assert.deepEqual(countries.find((c) => c.code === "FRA"), { code: "FRA", name: "France", iso2: "fr", names: {} });
   const { codes, unknown } = gen.resolveRegions(["France", "de", "ITA", "Atlantis", "france"]);
   assert.deepEqual([codes, unknown], [["FRA", "DEU", "ITA"], ["Atlantis"]]);
+  // Clipperton, Baikonur, Brazilian Island and Australian territories share
+  // their country's ISO-2 code: the country wins.
+  assert.deepEqual(gen.resolveRegions(["fr", "kz", "br", "au"]).codes, ["FRA", "KAZ", "BRA", "AUS"]);
   const out = gen.render({ regions: codes, width: 600, labels: true });
   for (const c of codes) assert.match(out.svg, new RegExp(`<path id="${c}" class="mg-land`));
   assert.doesNotMatch(out.svg, /<path id="ESP" class="mg-land/);

@@ -12,6 +12,7 @@ authors.workspace = true
 mapgen-core.workspace = true
 mapgen-data = { workspace = true, features = ["gpkg"] }
 mapgen-spec.workspace = true
+geo.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 axum = "0.8"

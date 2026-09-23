@@ -594,9 +594,12 @@ async fn regions_by_iso2_and_names_in_other_languages() {
     std::fs::write(
         dir.join("countries.geojson"),
         format!(
-            r#"{{"type":"FeatureCollection","features":[{},{}]}}"#,
+            r#"{{"type":"FeatureCollection","features":[{},{},{}]}}"#,
             country("DEU", "DE", "Germany", "Allemagne", 10.0),
-            country("NLD", "NL", "Netherlands", "Pays-Bas", 12.0)
+            country("NLD", "NL", "Netherlands", "Pays-Bas", 12.0),
+            // A small territory sharing the Netherlands' ISO-2 code, first
+            // alphabetically: `nl` must still be the Netherlands.
+            r#"{"type":"Feature","properties":{"ADM0_A3":"ANL","ISO_A2_EH":"NL","NAME":"Tiny","NAME_FR":"Minus"},"geometry":{"type":"Polygon","coordinates":[[[20,45],[20.1,45],[20.1,45.1],[20,45.1],[20,45]]]}}"#
         ),
     )
     .unwrap();
