@@ -42,7 +42,7 @@ colour the map by country, neighbours included.
 - **Two datasets, one border.** Neighbouring countries from one dataset are snapped onto the outline of regions from another, closing gaps and doubled borders.
 - **Easy restyling.** Four themes plus a flag for every colour. Colours live in one `<style>` block, can be emitted as CSS custom properties, and `.html` output adds live colour pickers.
 - **Data tools.** `mapgen convert` writes indexed GeoPackages (3–4× faster renders) and borrows readable ids (ISO 3166-2, FIPS) by spatial overlap; `mapgen check` finds invalid polygons, slivers, overlaps and near-miss borders, and `--repair` fixes what it safely can. `mapgen match` reports data codes a map lacks (usually data and boundaries from different years), and `mapgen reshape` moves data to new codes through a crosswalk: renames and merges automatically, splits by weight, and anything ambiguous listed for a decision.
-- **Ready for Commons.** `mapgen batch` names maps from a template and writes an upload manifest (SHA-1, `{{Information}}` fields, licence, categories) and description pages. `scripts/commons-status.py` tells which maps are new, changed or already on Commons, by hash ([docs/commons.md](docs/commons.md)).
+- **Ready for Commons.** `mapgen batch` names maps from a template and writes an upload manifest (SHA-1, `{{Information}}` fields, licence, categories) and description pages. `scripts/commons-status.py` tells which maps are new, changed or already on Commons, by hash. [docs/commons.md](docs/commons.md) also covers uploading and updating the pages that show a map.
 
 ## Gallery
 

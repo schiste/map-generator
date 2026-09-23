@@ -1,6 +1,6 @@
 # Uploading maps to Wikimedia Commons
 
-`mapgen` doesn't upload anything. It produces what upload tools need: predictable file
+`mapgen` doesn't upload or edit anything. It produces what upload tools need: predictable file
 names, a manifest with each map's SHA-1 and description fields, and optional description
 pages. A read-only script tells which maps are already on Commons.
 
@@ -86,6 +86,47 @@ Use an existing tool:
                   ignore_warnings=["exists"] if page.exists() else False)
       time.sleep(8)
   ```
+
+## 4. Update the pages that show a map
+
+**Same file name.** Every page that shows the map picks up the new version on its own.
+Captions and templates with an "as of" date still need editing. Mark the date where it
+appears, e.g. `<!-- date -->2024<!-- /date -->`, and replace what's between the markers
+with the map's `boundary_year` (or data date) from the manifest. Show a diff before saving:
+
+```python
+import re
+import pywikibot
+
+site = pywikibot.Site("commons", "commons")
+page = pywikibot.Page(site, "Template:COVID-19 Prevalence in US by county")
+new = re.sub(r"(<!-- date -->).*?(<!-- /date -->)", r"\g<1>2026-09-23\g<2>", page.text)
+pywikibot.showDiff(page.text, new)
+if new != page.text and pywikibot.input_yn("Save?", default=False):
+    page.text = new
+    page.save("Update the data date (map-generator)")
+```
+
+**New file name** (e.g. a dated name, so older versions stay available). Pages keep
+showing the old file until they are edited:
+
+1. List them on every wiki with [`prop=globalusage`](https://www.mediawiki.org/wiki/API:Globalusage):
+   ```sh
+   curl -s -A "your-tool (contact)" 'https://commons.wikimedia.org/w/api.php?action=query&format=json&formatversion=2&prop=globalusage&gulimit=max&titles=File:Old_name.svg'
+   ```
+2. Replace the old name with the new one. Across wikis,
+   [CommonsDelinker](https://commons.wikimedia.org/wiki/Commons:CommonsDelinker) does this
+   in one request: `{{universal replace|Old name.svg|New name.svg|reason=…}}` on
+   [its commands page](https://commons.wikimedia.org/wiki/Commons:CommonsDelinker/commands).
+   Administrators and file movers can add commands there; other users can ask one.
+   For a few pages on one wiki, Pywikibot's
+   [replace.py](https://www.mediawiki.org/wiki/Manual:Pywikibot/replace.py) shows each
+   diff and asks before saving (add `-simulate` for a dry run):
+   ```sh
+   python pwb.py replace -lang:en -family:wikipedia -page:"Some article" "Old name.svg" "New name.svg"
+   ```
+3. Tag the old file with [{{Superseded|New name.svg}}](https://commons.wikimedia.org/wiki/Template:Superseded),
+   and link the versions to each other through `other_versions` in the manifest.
 
 ## Etiquette
 
