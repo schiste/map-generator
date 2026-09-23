@@ -50,9 +50,29 @@ jobs:
           scripts/fetch-data.sh ne-geojson
           scripts/fetch-data.sh geoboundaries FRA ADM1
           scripts/fetch-data.sh geoboundaries USA ADM2
+          scripts/fetch-data.sh us-counties-fips
       - run: scripts/build-examples.sh
       - name: Gallery is byte-identical
         run: git diff --exit-code --stat docs/examples
+
+  # EPSG projections through PROJ (built from source: `bundled-proj`).
+  proj:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y cmake sqlite3 libsqlite3-dev
+      - run: cargo clippy -p mapgen-core -p mapgen-cli --features mapgen-cli/bundled-proj --all-targets
+      - run: cargo test -p mapgen-core --features bundled-proj
+      - name: End-to-end EPSG render
+        run: |
+          cargo run --release -p mapgen-cli --features bundled-proj -- render \
+            -i crates/mapgen-data/tests/fixtures/twin-regions.geojson --projection epsg:3035 \
+            -o "$RUNNER_TEMP/epsg.svg"
+          grep -q 'class="mg-land' "$RUNNER_TEMP/epsg.svg"
 
   wasm:
     runs-on: ubuntu-latest
