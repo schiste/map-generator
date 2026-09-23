@@ -58,6 +58,10 @@ export interface RenderSpec {
   attribution?: string;
   /** Draw the data credit in the bottom-right corner. */
   credit?: boolean;
+  /** Year the boundaries represent: `data-boundary-year` on <svg>, and in the credit. */
+  boundaryYear?: string;
+  /** Boundary dataset release: `data-source-release` on <svg>. */
+  sourceRelease?: string;
   theme?: "wikimedia" | "light" | "dark" | "mono";
   /** Any CSS colour, e.g. { water: "#c6ecff", earth: "tan", background: "none" }. */
   colors?: Partial<Record<ColorSlot, string>>;

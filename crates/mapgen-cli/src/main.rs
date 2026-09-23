@@ -114,6 +114,16 @@ struct InputArgs {
     /// Also draw the data credit in the bottom-right corner.
     #[arg(long)]
     credit: bool,
+
+    /// Year the boundaries represent, written to the SVG and the credit.
+    /// Default: `year` from the data file's `.license.json` (geoBoundaries).
+    #[arg(long)]
+    boundary_year: Option<String>,
+
+    /// Release of the boundary dataset. Default: `release` from the
+    /// `.license.json`.
+    #[arg(long)]
+    source_release: Option<String>,
 }
 
 impl InputArgs {
@@ -554,6 +564,14 @@ fn options(
         title,
         attribution: input.attribution(data).0,
         credit: input.credit,
+        boundary_year: input
+            .boundary_year
+            .clone()
+            .or_else(|| read_license(data).and_then(|l| l.year)),
+        source_release: input
+            .source_release
+            .clone()
+            .or_else(|| read_license(data).and_then(|l| l.release)),
         theme: style.theme(),
         css_vars: style.css_vars || html,
         labels: style.labels,
@@ -1363,6 +1381,12 @@ struct LicenseFile {
     source: String,
     #[serde(default)]
     via: Option<String>,
+    /// Year the boundaries represent (geoBoundaries `boundaryYearRepresented`).
+    #[serde(default)]
+    year: Option<String>,
+    /// Dataset release (boundary id, build date, commit).
+    #[serde(default)]
+    release: Option<String>,
 }
 
 impl LicenseFile {
@@ -1456,6 +1480,8 @@ mod tests {
             license: l.into(),
             source: "Src".into(),
             via: Some("geoBoundaries".into()),
+            year: None,
+            release: None,
         }
     }
 

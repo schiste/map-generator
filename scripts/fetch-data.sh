@@ -85,6 +85,9 @@ for m in metas:
         "source_url": m.get("boundarySourceURL"),
         "license_url": m.get("licenseSource"),
         "year": m.get("boundaryYearRepresented"),
+        # Which release of the boundaries: id, build date and repository commit.
+        "release": "{}, built {}, geoBoundaries@{}".format(
+            m["boundaryID"], m.get("buildDate"), url.split("/raw/")[1].split("/")[0] if "/raw/" in url else "?"),
         "iso": iso,
         "level": lvl,
     }

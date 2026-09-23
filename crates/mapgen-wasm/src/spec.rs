@@ -270,6 +270,10 @@ pub struct RenderSpec {
     pub attribution: Option<String>,
     #[serde(default)]
     pub credit: bool,
+    /// Year the boundaries represent, written to the SVG and the credit.
+    pub boundary_year: Option<String>,
+    /// Release of the boundary dataset.
+    pub source_release: Option<String>,
     pub theme: Option<String>,
     /// Colour overrides by slot: `background`, `water`, `land` (or `earth`),
     /// `contextLand`, `border`, `outline`, `contextBorder`, `lakeBorder`,
@@ -360,6 +364,8 @@ impl RenderSpec {
             title: self.title.clone(),
             attribution: self.attribution.clone(),
             credit: self.credit,
+            boundary_year: self.boundary_year.clone(),
+            source_release: self.source_release.clone(),
             theme,
             css_vars: self.css_vars || self.format == Format::Html,
             labels: self.labels,

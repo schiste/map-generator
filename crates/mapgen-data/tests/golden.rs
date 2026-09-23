@@ -68,6 +68,34 @@ fn features_are_sorted_and_escaped() {
 }
 
 #[test]
+fn boundary_version_is_on_the_root_and_in_the_credit() {
+    let subject = mapgen_data::geojson::read_features(
+        &fixture("twin-regions.geojson"),
+        "id",
+        "name",
+        "region",
+    )
+    .unwrap();
+    let opts = RenderOptions {
+        attribution: Some("Census".into()),
+        boundary_year: Some("2018".into()),
+        source_release: Some("USA-ADM2-52423323".into()),
+        ..RenderOptions::default()
+    };
+    let svg = render(
+        &MapLayers {
+            subject,
+            ..MapLayers::default()
+        },
+        &opts,
+    )
+    .unwrap()
+    .svg;
+    assert!(svg.contains(r#"data-boundary-year="2018" data-source-release="USA-ADM2-52423323">"#));
+    assert!(svg.contains("<desc id=\"attribution\">Census; boundaries as of 2018</desc>"));
+}
+
+#[test]
 fn layers_are_in_paint_order() {
     let svg = render_fixture();
     let pos = |s: &str| svg.find(s).unwrap_or_else(|| panic!("missing {s}"));

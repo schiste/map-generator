@@ -83,6 +83,12 @@ pub struct RenderOptions {
     /// geoBoundaries". Always embedded as `<desc>`; drawn when `credit` is set.
     pub attribution: Option<String>,
     pub credit: bool,
+    /// Year the boundaries represent (e.g. geoBoundaries'
+    /// `boundaryYearRepresented`), written to the SVG and the credit so a
+    /// map's boundary version is never implicit.
+    pub boundary_year: Option<String>,
+    /// Release of the boundary dataset (id, build date, commit…).
+    pub source_release: Option<String>,
     pub theme: Theme,
     /// Emit `var(--mg-*, …)` colours for restyling from page CSS.
     pub css_vars: bool,
@@ -123,6 +129,8 @@ impl Default for RenderOptions {
             title: None,
             attribution: None,
             credit: false,
+            boundary_year: None,
+            source_release: None,
             theme: Theme::default(),
             css_vars: false,
             labels: false,
@@ -300,7 +308,9 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
         panels: &panels,
         theme: &opts.theme,
         title: opts.title.as_deref(),
-        attribution: opts.attribution.as_deref(),
+        attribution: credit_with_version(opts).as_deref(),
+        boundary_year: opts.boundary_year.as_deref(),
+        source_release: opts.source_release.as_deref(),
         credit: opts.credit,
         precision: opts.precision,
         css_vars: opts.css_vars,
@@ -314,6 +324,16 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
         outside_frame,
         insets,
     })
+}
+
+/// The credit, with the boundary year appended when known.
+fn credit_with_version(opts: &RenderOptions) -> Option<String> {
+    match (&opts.attribution, &opts.boundary_year) {
+        (Some(a), Some(y)) => Some(format!("{a}; boundaries as of {y}")),
+        (Some(a), None) => Some(a.clone()),
+        (None, Some(y)) => Some(format!("Boundaries as of {y}")),
+        (None, None) => None,
+    }
 }
 
 fn sorted<T: Clone>(v: &[T], key: impl Fn(&T) -> &String) -> Vec<T> {

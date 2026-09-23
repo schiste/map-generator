@@ -40,6 +40,10 @@ pub struct SvgDocument<'a> {
     pub theme: &'a Theme,
     pub title: Option<&'a str>,
     pub attribution: Option<&'a str>,
+    /// Boundary version, as `data-boundary-year` / `data-source-release`
+    /// on the root element.
+    pub boundary_year: Option<&'a str>,
+    pub source_release: Option<&'a str>,
     /// Draw the attribution in the bottom-right corner.
     pub credit: bool,
     /// Decimal places kept for coordinates.
@@ -64,9 +68,16 @@ pub fn write_svg(doc: &SvgDocument) -> String {
     let mut ids = HashSet::new();
 
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    let version: String = [
+        ("data-boundary-year", doc.boundary_year),
+        ("data-source-release", doc.source_release),
+    ]
+    .iter()
+    .filter_map(|(k, v)| v.map(|v| format!(" {k}=\"{}\"", escape(v))))
+    .collect();
     let _ = writeln!(
         out,
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\">"
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\"{version}>"
     );
     if let Some(title) = doc.title {
         let _ = writeln!(out, "<title>{}</title>", escape(title));

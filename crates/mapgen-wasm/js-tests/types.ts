@@ -32,6 +32,8 @@ const conic: RenderSpec = {
   parentBorderWidth: 1.5,
   leaders: false,
   borderMode: "regions",
+  boundaryYear: "2018",
+  sourceRelease: "USA-ADM2-52423323",
   curvedLabels: true,
   labelMinScale: 0.8,
   snap: 0,

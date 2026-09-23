@@ -20,7 +20,13 @@ Downloads go to `./data`, which is git-ignored. Nothing is vendored.
 - `scripts/fetch-data.sh geoboundaries FRA ADM2` downloads one country and level; `FRA,DEU` or `ALL`
   downloads several. Add `--simplified` for geoBoundaries' lighter geometry.
 - Files: `data/geoboundaries/<ISO3>-<LEVEL>.geojson` plus `<ISO3>-<LEVEL>.license.json` with the
-  licence, original source, and source URL, taken from the geoBoundaries API.
+  licence, original source, source URL, the year the boundaries represent and the release
+  (boundary id, build date, commit), taken from the geoBoundaries API.
+- Boundary version: every map made from such a file says which boundaries it shows, as
+  `data-boundary-year` and `data-source-release` on `<svg>` and "boundaries as of <year>" in the
+  credit. For sources without this metadata, pass `--boundary-year` (and `--source-release`).
+  For example, geoBoundaries' US counties represent 2018, before Connecticut's 2022
+  planning regions and Alaska's 2019 Valdez-Cordova split.
 - Properties: `shapeName` (name), `shapeISO` (ISO 3166-2, often empty below ADM1), `shapeID`
   (stable id, used as fallback), `shapeGroup` (ISO3).
 - Only the `gbOpen` release is used. geoBoundaries' other releases (`gbHumanitarian`,
