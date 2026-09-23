@@ -4,6 +4,9 @@ Thanks for helping! A few ground rules keep the output reproducible:
 
 1. `cargo fmt --all && cargo clippy --workspace --all-targets && cargo test --workspace`
    must pass. CI runs these commands on Linux, macOS, and Windows.
+   EPSG projections are behind the `proj` feature: `cargo test -p mapgen-core --features
+   bundled-proj` builds PROJ from source (needs cmake and SQLite), or use `--features proj`
+   with a system libproj.
    For the WebAssembly crate, see `crates/mapgen-wasm/README.md` (wasm-pack, Node and
    headless-Chrome tests, TypeScript check, native parity).
 2. **Never introduce nondeterminism** into `mapgen-core`: no `HashMap` iteration

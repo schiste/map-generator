@@ -12,52 +12,75 @@
    stripped (`svg::fmt_num`). Golden tests and `scripts/build-examples.sh` enforce this.
 3. **Load only what you draw.** GeoPackage filters run in SQL and rows are streamed.
 
-## Stages (`pipeline.rs`)
+## Stages
 
-### 1. Frame (`frame.rs`)
+### 1. Frame and insets (`frame.rs`, `pipeline.rs`)
 
-The *anchor* is the geometry whose extent becomes the map frame:
+Subject polygons are grouped into *clusters* (single linkage: bounding boxes within
+500 km, antimeridian-aware). With `--frame auto`, the heaviest cluster is the main map;
+the next ones (up to `--max-insets`, each at least 0.025 % of the main landmass) become
+insets: Alaska, Hawaii, the French overseas départements. `--frame all`, `--bbox` and
+`--frame world` give a single frame.
 
-- `auto`: single-linkage clustering of the subject's polygons (bounding boxes within
-  500 km, antimeridian-aware), keeping the cluster with the largest area. This drops
-  French Guiana and Réunion from France but keeps Corsica.
-- `all`: every polygon.
-- `bbox`: a densified lon/lat box (presets: `europe`, `oceania`…; `west > east` crosses 180°).
-- `world`: no anchor; the frame is the globe outline.
+Each inset is a separate *panel* with its own projection, box size (a quarter of the
+map's short side, scaled by the fourth root of its area relative to the main landmass)
+and position: corners first, then along the edges, choosing the box that covers the
+least of the main map's land (measured on a 6 px raster) without overlapping another inset.
 
-### 2. Projection (`projection.rs`)
+### 2. Projection (`projection.rs`, `epsg.rs`)
 
-- **LAEA** (spherical, authalic radius) centred on the anchor. It preserves area, and
-  EPSG:3035 is the same projection centred on 52°N 10°E.
-- **Equal Earth** for world maps, or when the anchor spans more than 200° of longitude.
+Built-in, spherical, deterministic (`libm`): Lambert azimuthal equal-area (default),
+Albers equal-area conic (auto for regions ≥ 45° wide at 20–70° latitude; standard
+parallels by the one-sixth rule), Lambert conformal conic, and Equal Earth (world maps).
+`epsg:<code>` goes through PROJ behind the `proj` cargo feature.
 
-### 3. Antimeridian (`antimeridian.rs`)
+### 3. Antimeridian (`antimeridian.rs`, `panel.rs`)
 
-The centre longitude comes from `covering_arc`: sort the longitudes, find the widest empty
-gap, and take the complement arc. That gives Fiji 178°E, not 0°. LAEA wraps `lon − lon0`
-per point, so it has no seam. Equal Earth does, so `split_at_seam` unwraps each ring,
-shifts it by 360° as needed, and intersects only crossing polygons with ±180° strips.
-Non-crossing polygons keep bit-identical coordinates.
+The centre longitude comes from `covering_arc` (the complement of the widest empty gap).
+When the projection has no seam at ±180°, longitude +180° is rewritten as −180°, so the two
+sides of a dataset's cut share vertices; border segments with both ends on ±180° are
+dropped in any case (Natural Earth's two sides of Taveuni don't even share vertices).
+Equal Earth's seam is handled by `split_at_seam`, whose unwrapping is exact per vertex
+(`wrap(lon − lon0)` plus a whole multiple of 360°) so shared borders stay shared.
 
-### 4. Simplification (`simplify.rs`)
+### 4. Topology, simplification and snapping (`simplify.rs`, `panel.rs`)
 
-This is TopoJSON-style: find junctions (vertices whose neighbour pair differs between the
-rings using them), cut rings into arcs, deduplicate arcs by canonical orientation,
-simplify each arc once with Visvalingam–Whyatt (endpoints fixed), and stitch the rings
-back together. The tolerance is given in pixels (`--simplify`) and converted to projected
-units² once the scale is known. A region never disappears; if all of it collapses, its
-largest part is kept unsimplified.
+`Topology` finds junctions (vertices whose neighbour pair differs between the rings using
+them), cuts rings into arcs, stores each arc once, and records which features use it. Arcs
+are simplified once with Visvalingam–Whyatt (tolerance in pixels). Neighbouring countries'
+vertices within `--snap` pixels of the subject's outline are moved onto it (R-tree nearest
+segment), which closes gaps and doubled borders between two datasets.
 
-### 5. Clip and cull
+`Topology::finish` stitches rings back, drops parts under `--min-area` (never a region's
+largest part), and returns the border arcs of what survived, each with the features on
+either side: one feature used once is *outline*; two features are *internal* or, when their
+`parent` codes differ, *parent*; one feature using an arc twice is an internal cut and is
+not drawn.
 
-Features are clipped to the frame rectangle (`geo::BooleanOps`). Features entirely inside
-the frame skip clipping, so shared borders stay exact. Parts smaller than `--min-area` px²
-are dropped, except the largest part of each subject region.
+### 5. Clip, borders, labels (`panel.rs`, `labels.rs`)
+
+Geometry and border lines are clipped to the frame (features entirely inside skip it).
+Labels are placed in pixels, largest region first: straight at the pole of inaccessibility
+(polylabel) or nearby positions, then curved along the principal-axis centreline of long,
+thin regions, at 100/85/70 % size; small regions get a leader label outside where the text
+covers no region. Collisions use an R-tree.
 
 ### 6. Output (`svg.rs`, `html.rs`, `theme.rs`)
 
-Layers in paint order: `#background`, `#water`, `#context`, `#land`, `#lakes`, `#labels`.
-Every colour is defined once in the `<style>` block (`.mg-water{fill:…}`), optionally as
-`var(--mg-water, …)`. Ids are made XML-valid and unique. HTML output inlines the SVG and
-adds colour pickers, theme presets, and a download button that bakes the chosen colours
-back into a plain SVG.
+Main-map layers, bottom to top: `#background`, `#water`, `#context`, `#context-borders`,
+`#land`, `#lakes`, `#borders` (one path per kind: internal, parent, outline, disputed),
+`#labels`; then one `g.mg-inset` per inset. Fills have no stroke; every colour and width is
+in the `<style>` block, optionally as `var(--mg-<slot>, …)`.
+
+## Data tools (`mapgen-data`, `validate.rs`)
+
+- `gpkg_write.rs` writes GeoPackages with the standard R-tree spatial index and B-tree
+  indexes on the region and id columns; `read_layer_in` queries them by bounding box.
+- `crosswalk.rs` borrows codes from a reference layer: reference features are grouped by
+  code and unioned, and a region takes a unit's code when each covers at least half of the
+  other.
+- `validate.rs` checks for invalid polygons (edge crossings found with an R-tree, since
+  `geo`'s `Validation` is quadratic on 100 000-vertex rings), out-of-range coordinates,
+  repeated vertices, slivers (Polsby–Popper), overlaps, near-miss borders and duplicate ids.
+  `repair` snaps later features onto earlier ones (vertex first, then edge), cleans up, and
+  undoes the snapping when it did not reduce near misses.

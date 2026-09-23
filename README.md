@@ -25,22 +25,24 @@ Each region is its own selectable element:
 
 ## Features
 
-- **Deterministic.** The same input and options give byte-identical output, so maps can be committed, diffed and cached.
-- **Equal-area by default.** Region maps use Lambert Azimuthal Equal-Area centred on the region. World maps use Equal Earth.
-- **Antimeridian-safe.** Fiji, Russia and Kiribati are centred correctly. World maps are cut along the projection seam.
-- **Gap-free simplification.** Shared borders are simplified once (TopoJSON-style arcs), so neighbouring regions never show slivers.
-- **Automatic framing.** Frames the main landmass and leaves out far overseas territories (which it reports). `--bbox` and continent presets are available.
-- **Layers.** Background, water (sea frame + lakes), neighbouring countries, the mapped regions, and optional labels with collision avoidance.
+- **Deterministic.** The same input and options give byte-identical output on every OS and in WebAssembly, so maps can be committed, diffed and cached.
+- **The right projection.** Lambert azimuthal equal-area for most regions, Albers equal-area conic for wide mid-latitude countries (the US, Canada, Russia, China), Equal Earth for world maps; `albers`, `lcc` or any `epsg:<code>` on request (EPSG needs the `proj` build feature).
+- **Borders drawn once, by kind.** Shared borders are simplified and drawn once (TopoJSON-style arcs), so neighbours never show gaps or doubled lines. Borders between groups of regions (e.g. régions on a département map, states on a county map) are thicker; the outline of the mapped area, neighbouring countries' borders and disputed boundaries (dashed) each have their own style.
+- **Antimeridian-safe.** Fiji, Russia and Kiribati are centred correctly, and datasets' artificial 180° cuts (Taveuni) are never drawn as borders.
+- **Insets.** Far-away parts (Alaska, Hawaii, Puerto Rico, French overseas départements) go in corner boxes, sized by area and placed where they cover the least of the map.
+- **Labels that fit.** Placed at each region's visual centre, shrunk to fit, curved along long thin shapes (Chile), or outside small regions with a leader line where that covers no other region.
+- **Two datasets, one border.** Neighbouring countries from one dataset are snapped onto the outline of regions from another, closing gaps and doubled borders.
 - **Easy restyling.** Four themes plus a flag for every colour. Colours live in one `<style>` block, can be emitted as CSS custom properties, and `.html` output adds live colour pickers.
-- **Fast.** France with context and lakes takes about 0.9 s, mostly parsing 50 MB of GeoJSON (GeoPackages are queried by region instead). `mapgen batch` renders every country in parallel.
+- **Data tools.** `mapgen convert` writes indexed GeoPackages (3–4× faster renders) and borrows readable ids (ISO 3166-2, FIPS) by spatial overlap; `mapgen check` finds invalid polygons, slivers, overlaps and near-miss borders, and `--repair` fixes what it safely can.
 
 ## Gallery
 
 | | |
 | --- | --- |
 | ![Europe](docs/examples/europe.svg) | ![Japan, light theme](docs/examples/japan-light.svg) |
-| ![World, dark theme](docs/examples/world-dark.svg) | ![Fiji](docs/examples/fiji.svg) |
-| ![France, régions (IGN via geoBoundaries)](docs/examples/france-regions.svg) | ![US counties (Census Bureau, public domain)](docs/examples/usa-counties.svg) |
+| ![World, dark theme](docs/examples/world-dark.svg) | ![South America, curved label on Chile](docs/examples/south-america.svg) |
+| ![France, régions (IGN via geoBoundaries)](docs/examples/france-regions.svg) | ![US counties (Census Bureau, public domain), Albers, insets](docs/examples/usa-counties.svg) |
+| ![Fiji, straddling 180°](docs/examples/fiji.svg) | |
 
 Open [`docs/examples/france-departements.html`](docs/examples/france-departements.html)
 locally for the interactive colour editor. Regenerate everything with `scripts/build-examples.sh`.
@@ -55,7 +57,9 @@ Every map has five visual layers, each with its own colour:
 | water | `--water` | Sea (map frame or globe) and lakes |
 | land | `--land` / `--earth` | The regions being mapped |
 | context-land | `--context-land` | Neighbouring countries |
-| border, context-border, lake-border, label | `--border` … | Strokes and text |
+| border | `--border` | Borders between mapped regions (width: `--border-width`, `--parent-border-width`) |
+| outline | `--outline` | Outer edge of the mapped area: coasts and borders with neighbours (`--outline-width`) |
+| context-border, lake-border, disputed-border, label | `--context-border` … | Other strokes and text |
 
 ```sh
 mapgen render … --theme dark                                   # wikimedia | light | dark | mono
@@ -76,32 +80,45 @@ With `--css-vars`, an SVG inlined in a web page can be recoloured from CSS:
 ## CLI
 
 ```sh
-# Finer subdivisions from geoBoundaries (ADM1–ADM5, one file per country and level)
-scripts/fetch-data.sh geoboundaries ITA ADM2
-mapgen render -i data/geoboundaries/ITA-ADM2.geojson --dataset geoboundaries --credit -o italy-provinces.svg
+# Départements with régions as parents, neighbours, lakes, disputed borders, labels;
+# overseas départements go in insets automatically
+mapgen render -i data/ne_10m_admin_1.geojson --dataset ne-admin1 --region FRA --labels \
+    --context data/ne_10m_admin_0.geojson --lakes data/ne_10m_lakes.geojson \
+    --disputed data/ne_10m_disputed_lines.geojson -o france.svg
+
+# Finer subdivisions from geoBoundaries (ADM1–ADM5), converted once into an
+# indexed GeoPackage with readable ids borrowed from a reference layer
+scripts/fetch-data.sh geoboundaries USA ADM2 && scripts/fetch-data.sh us-counties-fips
+mapgen convert -i data/geoboundaries/USA-ADM2.geojson --dataset geoboundaries -o usa-counties.gpkg \
+    --ids-from data/us-counties-fips.geojson --ids-column id --ids-parent-column STATE --ids-prefix US-
+mapgen render -i usa-counties.gpkg --dataset geoboundaries --credit -o usa.svg   # US-06037, …
+
+# Projections
+mapgen render … --projection albers --parallels 29.5,45.5
+mapgen render … --projection epsg:5070          # needs: cargo build --release --features proj
 
 # A continent, a custom box, or the world
 mapgen render -i data/ne_10m_admin_0.geojson --dataset ne-admin0 --continent Europe -o europe.svg
 mapgen render -i data/ne_10m_admin_0.geojson --dataset ne-admin0 --bbox=-20,25,60,72 -o box.svg
 mapgen render -i data/ne_10m_admin_0.geojson --dataset ne-admin0 --frame world --center-lon 150 -o pacific.svg
 
-# Every country's Admin-1 map, in parallel
+# Check and repair input data
+mapgen check -i data/geoboundaries/AUT-ADM2.geojson --dataset geoboundaries
+mapgen convert -i data/geoboundaries/AUT-ADM2.geojson --dataset geoboundaries --repair -o aut.gpkg
+
+# Every country's Admin-1 map, in parallel (--check reports input issues per map)
 mapgen batch -i data/ne_10m_admin_1.geojson --dataset ne-admin1 --context data/ne_10m_admin_0.geojson --out-dir out/
 
 # Many geoBoundaries files at once: a directory, a glob, or a list (one map per file,
 # each credited from its own licence); --regions skips other countries' files unread
 scripts/fetch-data.sh geoboundaries ALL ADM1 --simplified
 mapgen batch -i data/geoboundaries --dataset geoboundaries --context data/ne_10m_admin_0.geojson --credit --out-dir out/
-mapgen batch -i data/geoboundaries/*-ADM2.geojson --dataset geoboundaries --regions FRA,DEU --out-dir out/
-
-# Any GeoJSON or GeoPackage layer
-mapgen render -i my.geojson --id-column code --name-column label -o mine.svg
 ```
 
-Other useful flags include `--width`, `--padding`, `--simplify` (px), `--min-area` (px²), `--margin`,
-`--frame auto|all|world`, `--projection auto|laea|equal-earth`, `--name-column name_fr` (Natural Earth ships names in about 40 languages),
-and `--attribution` / `--credit` for the data credit.
-Run `mapgen render --help` for the full list.
+Other useful flags: `--width`, `--padding`, `--simplify` (px), `--min-area` (px²), `--margin`,
+`--frame auto|all|world`, `--insets auto|none`, `--max-insets`, `--snap` (px), `--no-leaders`,
+`--no-curved-labels`, `--label-min-scale`, `--parent-column`, `--name-column name_fr` (Natural Earth
+ships names in about 40 languages), and `--attribution` / `--credit`. Run `mapgen render --help` for the full list.
 
 ## In the browser (WebAssembly)
 
@@ -126,14 +143,16 @@ cd crates/mapgen-wasm && npm run build:web && npm run serve   # http://localhost
 
 | Crate | Role |
 | --- | --- |
-| [`mapgen-core`](crates/mapgen-core) | Pure pipeline, no I/O: framing, projection, antimeridian, simplification, clipping, SVG/HTML. |
-| [`mapgen-data`](crates/mapgen-data) | Readers for Natural Earth, geoBoundaries, and any GeoPackage or GeoJSON layer. |
+| [`mapgen-core`](crates/mapgen-core) | Pure pipeline, no I/O: framing and insets, projections, antimeridian, shared-border topology, snapping, labels, validation, SVG/HTML. |
+| [`mapgen-data`](crates/mapgen-data) | Readers for Natural Earth, geoBoundaries, and any GeoPackage or GeoJSON layer; indexed GeoPackage writer; id crosswalk. |
 | [`mapgen-cli`](crates/mapgen-cli) | The `mapgen` binary. |
 | [`mapgen-wasm`](crates/mapgen-wasm) | WebAssembly/JavaScript API and browser playground. |
 
 ```
-read (SQL filter) ─► frame ─► pick projection ─► seam split ─► project
-   ─► shared-border simplify ─► clip to frame ─► cull specks ─► themed SVG / HTML
+read (SQL / R-tree) ─► clusters: main frame + insets ─► per panel: pick projection
+   ─► seam split / 180° canonicalisation ─► project ─► shared-border topology
+   ─► simplify arcs ─► snap neighbours onto the outline ─► cull ─► clip
+   ─► borders by kind + labels ─► themed SVG / HTML
 ```
 
 See [docs/architecture.md](docs/architecture.md).
@@ -157,11 +176,12 @@ same licence). No dataset is vendored in this repository. See
 
 ## Known limitations and roadmap
 
-- [ ] Borders drawn as a separate mesh, so each border is stroked once. Today each region strokes its own outline, which also draws Natural Earth's 180° cut through Taveuni (Fiji).
+- Drawing every border once, as its own layer, makes files about 1.5–2.5× larger than stroking each region's outline (every coordinate appears in a fill and in a border).
+- Labels that fit nowhere, even with a leader line, are dropped (e.g. the small départements around Paris). Label widths are estimated, not measured from a font.
+- `--repair` reliably removes repeated vertices and degenerate rings and rebuilds invalid polygons; snapping near-miss borders is kept only when it reduces them, which on high-resolution geoBoundaries data is rarely the case.
+- EPSG projections (`proj` feature) use the platform's math library, so unlike the built-in projections they are deterministic per platform but not guaranteed identical across platforms.
 - [ ] Rivers and coastlines from OpenStreetMap (ODbL), label points from GeoNames (CC BY)
-- [ ] Smarter label placement (pole of inaccessibility, leader lines). Today labels that collide or don't fit are dropped.
-- [ ] Insets for overseas territories (today they're reported and left out, or included with `--frame all`)
-- [ ] Optional `proj` backend for explicit EPSG codes
+- [ ] Choropleth and highlight modes
 
 ## Contributing
 

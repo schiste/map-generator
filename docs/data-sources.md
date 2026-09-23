@@ -40,6 +40,26 @@ Licences seen in practice:
 renders every downloaded file, crediting each map from its own sidecar.
 Check the `.license.json` before publishing.
 
+## Natural Earth disputed boundaries (public domain)
+
+`ne_10m_admin_0_boundary_lines_disputed_areas` (fetched by `ne-geojson` as
+`data/ne_10m_disputed_lines.geojson`): claim and disputed boundary lines, drawn dashed with
+`--disputed`.
+
+## US county FIPS codes (public domain)
+
+`scripts/fetch-data.sh us-counties-fips` fetches US Census county boundaries with their
+5-digit FIPS codes as feature ids (as packaged by plotly/datasets, MIT, pinned to a
+commit). Use it as a crosswalk reference for geoBoundaries counties:
+
+```sh
+mapgen convert -i data/geoboundaries/USA-ADM2.geojson --dataset geoboundaries -o usa.gpkg \
+  --ids-from data/us-counties-fips.geojson --ids-column id --ids-parent-column STATE --ids-prefix US-
+```
+
+Natural Earth Admin-1 works the same way for ISO 3166-2 codes (`--ids-column iso_3166_2`,
+or `region_cod` to get e.g. French régions).
+
 ## Planned
 
 - **OpenStreetMap / Geofabrik** (ODbL): fine coastlines and rivers.
