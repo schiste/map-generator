@@ -72,8 +72,31 @@ pub struct Label {
 /// Average glyph advance of a sans-serif font, as a fraction of the size.
 const CHAR_WIDTH: f64 = 0.56;
 
+/// Advance of one character, as a fraction of the size: East Asian wide
+/// characters (CJK ideographs, kana, Hangul, fullwidth forms) are square.
+fn char_width(c: char) -> f64 {
+    let wide = matches!(c as u32,
+        0x1100..=0x115F
+        | 0x2E80..=0x303E
+        | 0x3041..=0x33FF
+        | 0x3400..=0x4DBF
+        | 0x4E00..=0x9FFF
+        | 0xA000..=0xA4CF
+        | 0xAC00..=0xD7A3
+        | 0xF900..=0xFAFF
+        | 0xFE30..=0xFE4F
+        | 0xFF00..=0xFF60
+        | 0xFFE0..=0xFFE6
+        | 0x20000..=0x3FFFD);
+    if wide {
+        1.0
+    } else {
+        CHAR_WIDTH
+    }
+}
+
 fn text_width(text: &str, size: f64) -> f64 {
-    CHAR_WIDTH * size * text.chars().count() as f64
+    size * text.chars().map(char_width).sum::<f64>()
 }
 
 /// Places labels for `regions` (`(name, geometry in pixels)`); leader labels
@@ -463,17 +486,14 @@ fn centerline(poly: &Polygon<f64>, samples: usize) -> Option<Centerline> {
 /// the same width estimate as placement; the direction is taken over one
 /// letter's width, smoothing the centreline's corners.
 pub fn letters(path: &[(f64, f64)], text: &str, size: f64) -> Vec<(char, f64, f64, f64)> {
-    let advance = CHAR_WIDTH * size;
-    let start = (path_length(path) - text_width(text, size)) / 2.0;
+    let mut d = (path_length(path) - text_width(text, size)) / 2.0;
     text.chars()
-        .enumerate()
-        .map(|(i, c)| {
-            let d = start + advance * (i as f64 + 0.5);
-            let (x, y) = point_at(path, d);
-            let (a, b) = (
-                point_at(path, d - advance / 2.0),
-                point_at(path, d + advance / 2.0),
-            );
+        .map(|c| {
+            let advance = char_width(c) * size;
+            let mid = d + advance / 2.0;
+            d += advance;
+            let (x, y) = point_at(path, mid);
+            let (a, b) = (point_at(path, d - advance), point_at(path, d));
             (c, x, y, atan2(b.1 - a.1, b.0 - a.0).to_degrees())
         })
         .collect()
@@ -665,6 +685,16 @@ mod tests {
         assert!(x == 100.0 && (y - (14.0 - 2.8)).abs() < 1e-9 && angle == 90.0);
         // The middle letter straddles the corner: its direction is in between.
         assert!((ls[2].3 - 45.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn wide_characters_are_square() {
+        assert_eq!(text_width("法國", 10.0), 20.0);
+        assert!((text_width("France", 10.0) - 33.6).abs() < 1e-9);
+        assert_eq!(text_width("서울", 10.0), 20.0);
+        // Letters advance by their own width.
+        let ls = letters(&[(0.0, 0.0), (100.0, 0.0)], "a法", 10.0);
+        assert!((ls[1].1 - ls[0].1 - (2.8 + 5.0)).abs() < 1e-9);
     }
 
     #[test]

@@ -213,8 +213,8 @@ same licence). No dataset is vendored in this repository. See
 ## Known limitations and roadmap
 
 - Drawing every border once, as its own layer, makes files about 1.5–2.5× larger than stroking each region's outline (every coordinate appears in a fill and in a border). `--border-mode regions` gives the per-region strokes back (e.g. France: 218 KB instead of 347 KB), with each region self-contained for hover highlighting, but shared borders drawn twice and no coast/land-border distinction.
-- Multilingual labels: Wikimedia's renderer (librsvg) matches `systemLanguage` on the language subtag only, so `zh-Hans` and `zh-Hant` can't both be picked from one file there (the first listed wins); browsers tell them apart.
-- Labels that fit nowhere, even with a leader line, are dropped (e.g. the small départements around Paris). Label widths are estimated, not measured from a font.
+- Multilingual labels: librsvg (Wikimedia's renderer) matches `systemLanguage` tags exactly, so `lang=pt` won't pick `pt-BR`: pass the tags readers will ask for. `zh-Hans` and `zh-Hant` also list `zh-CN`, `zh-SG`, `zh-MY` and `zh-TW`, `zh-HK`, `zh-MO`; add `zh` for readers asking for plain Chinese (more specific tags always take precedence). Label widths are estimated (CJK characters as square), not measured from a font.
+- Labels that fit nowhere, even with a leader line, are dropped (e.g. the small départements around Paris).
 - `--repair` reliably removes repeated vertices and degenerate rings and rebuilds invalid polygons; snapping near-miss borders is kept only when it reduces them, which on high-resolution geoBoundaries data is rarely the case.
 - EPSG projections (`proj` feature) use the platform's math library, so unlike the built-in projections they are deterministic per platform but not guaranteed identical across platforms.
 - [ ] Rivers and coastlines from OpenStreetMap (ODbL), label points from GeoNames (CC BY)

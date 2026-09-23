@@ -148,15 +148,16 @@ fn labels_switch_on_system_language() {
         .unwrap();
     let lines: Vec<&str> = westland.trim().lines().collect();
     assert_eq!(lines.len(), 4, "{westland}");
+    // More specific tags first: a switch renders its first match.
     assert!(
-        lines[0].starts_with("<text systemLanguage=\"fr\" class=\"mg-label\"")
-            && lines[0].ends_with(">Ouestland</text>")
+        lines[0].starts_with("<text systemLanguage=\"zh-Hant,zh-TW,zh-HK,zh-MO\"")
+            && lines[0].ends_with(">西地</text>")
     );
-    assert_eq!(lines[1], "<g systemLanguage=\"de\"/>");
     assert!(
-        lines[2].starts_with("<text systemLanguage=\"zh-Hant\"")
-            && lines[2].ends_with(">西地</text>")
+        lines[1].starts_with("<text systemLanguage=\"fr\" class=\"mg-label\"")
+            && lines[1].ends_with(">Ouestland</text>")
     );
+    assert_eq!(lines[2], "<g systemLanguage=\"de\"/>");
     assert!(
         lines[3].starts_with("<text class=\"mg-label\"") && lines[3].ends_with(">Westland</text>")
     );

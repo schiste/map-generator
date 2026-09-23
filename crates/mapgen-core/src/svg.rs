@@ -428,10 +428,13 @@ fn write_labels(
         .collect();
     features.sort_unstable();
     features.dedup();
+    // A switch renders its first match and `zh` matches `zh-Hant` readers,
+    // so more specific tags go first.
+    let mut translations: Vec<&(String, Vec<Label>)> = panel.translations.iter().collect();
+    translations.sort_by_key(|(lang, _)| std::cmp::Reverse(lang.split('-').count()));
     for i in features {
         let default = find(labels, i);
-        let variants: Vec<(&str, Option<Label>)> = panel
-            .translations
+        let variants: Vec<(&str, Option<Label>)> = translations
             .iter()
             .map(|(lang, ls)| (lang.as_str(), find(ls, i)))
             .filter(|(_, l)| *l != default)
@@ -447,7 +450,7 @@ fn write_labels(
         }
         out.push_str("<switch>\n");
         for (lang, l) in variants {
-            let attr = format!(" systemLanguage=\"{}\"", escape(lang));
+            let attr = format!(" systemLanguage=\"{}\"", escape(&system_language(lang)));
             match l {
                 None => {
                     let _ = writeln!(out, "<g{attr}/>");
@@ -469,6 +472,18 @@ fn write_labels(
         out.push_str("</switch>\n");
     }
     out.push_str("</g>\n");
+}
+
+/// The `systemLanguage` list for a language. librsvg treats each entry as a
+/// language range (`zh` picks `zh-Hant` readers, `zh-Hans` doesn't pick
+/// `zh`), so the Chinese scripts also list the region tags Wikimedia's
+/// `lang=` uses for them.
+fn system_language(lang: &str) -> String {
+    match lang.to_ascii_lowercase().as_str() {
+        "zh-hans" => format!("{lang},zh-CN,zh-SG,zh-MY"),
+        "zh-hant" => format!("{lang},zh-TW,zh-HK,zh-MO"),
+        _ => lang.to_owned(),
+    }
 }
 
 /// One child of a `<switch>`: a single element carries `attr` itself,
