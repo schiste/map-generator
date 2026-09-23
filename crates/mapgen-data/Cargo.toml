@@ -12,7 +12,7 @@ authors.workspace = true
 mapgen-core.workspace = true
 geo-types.workspace = true
 thiserror.workspace = true
-rusqlite = { version = "0.37", features = ["bundled"], optional = true }
+rusqlite = { version = "0.40", features = ["bundled"], optional = true }
 geozero = { version = "0.14", default-features = false, features = ["with-wkb", "with-geo"], optional = true }
 geojson = { version = "0.24", features = ["geo-types"] }
 serde_json.workspace = true
@@ -23,4 +23,4 @@ default = ["gpkg"]
 gpkg = ["dep:rusqlite", "dep:geozero"]
 
 [dev-dependencies]
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
