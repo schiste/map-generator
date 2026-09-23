@@ -639,7 +639,10 @@ async fn regions_by_iso2_and_names_in_other_languages() {
     }
     let r = get(&app, "/api/v1/maps/countries/DEU.svg?capitals=countries").await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
-    assert!(r.text().contains("data-wikidata=\"Q64\""), "capitals from datasets.toml");
+    assert!(
+        r.text().contains("data-wikidata=\"Q64\""),
+        "capitals from datasets.toml"
+    );
     let bad = get(&app, "/api/v1/maps/countries/DEU.svg?capitals=towns").await;
     assert_eq!(bad.status, StatusCode::BAD_REQUEST);
     assert_eq!(
