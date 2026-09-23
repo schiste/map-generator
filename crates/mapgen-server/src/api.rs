@@ -349,8 +349,11 @@ fn select<'a>(d: &'a DatasetEntry, spec: &str) -> ApiResult<Selection<'a>> {
         d.regions
             .get(input)
             .or_else(|| {
+                let lower = input.to_lowercase();
                 d.regions.values().find(|r| {
-                    r.code.eq_ignore_ascii_case(input) || r.name.eq_ignore_ascii_case(input)
+                    r.code.eq_ignore_ascii_case(input)
+                        || r.name.to_lowercase() == lower
+                        || r.aliases.contains(&lower)
                 })
             })
             .ok_or_else(|| {

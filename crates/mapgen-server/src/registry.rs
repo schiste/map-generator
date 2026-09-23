@@ -87,6 +87,9 @@ pub struct Provenance {
 pub struct Region {
     pub code: String,
     pub name: String,
+    /// Other ways to write it, lowercase: ISO 3166-1 alpha-2, names in every
+    /// Natural Earth language (`de`, `allemagne`, `deutschland`…).
+    pub aliases: Vec<String>,
     pub file: PathBuf,
     /// Column compared against `code`; `None` for the whole file.
     pub column: Option<String>,
@@ -122,6 +125,12 @@ pub struct Registry {
 
 pub type Result<T> = std::result::Result<T, String>;
 
+/// Natural Earth's name languages (`name_xx` columns).
+const NE_LANGUAGES: [&str; 26] = [
+    "ar", "bn", "de", "el", "en", "es", "fa", "fr", "he", "hi", "hu", "id", "it", "ja", "ko", "nl",
+    "pl", "pt", "ru", "sv", "tr", "uk", "ur", "vi", "zh", "zh-Hant",
+];
+
 impl Registry {
     pub fn load(dir: &Path) -> Result<Registry> {
         let path = dir.join("datasets.toml");
@@ -147,7 +156,20 @@ impl Registry {
         let countries_file = config.context.countries.as_ref().map(at);
         let countries = countries_file
             .as_deref()
-            .map(|p| layer(p, Preset::NeAdmin0))
+            .map(|p| -> Result<LoadedLayer> {
+                // With names in every language, for region aliases.
+                let spec = LayerSpec {
+                    languages: NE_LANGUAGES.iter().map(|l| l.to_string()).collect(),
+                    ..LayerSpec::with_dataset(Preset::NeAdmin0)
+                };
+                let rows = mapgen_data::read_layer(p, &spec.query(), None)
+                    .map_err(|e| format!("{}: {e}", p.display()))?;
+                Ok(LoadedLayer::from_rows(
+                    rows.into_iter().map(|f| (Some(f.id.clone()), f)).collect(),
+                    true,
+                    LoadedLayer::default_credit(&spec),
+                ))
+            })
             .transpose()?
             .map(Arc::new);
         let lakes = config
@@ -180,11 +202,21 @@ impl Registry {
             })
             .transpose()?;
 
-        let names: BTreeMap<String, String> = countries
+        let names: BTreeMap<String, (String, Vec<String>)> = countries
             .as_ref()
             .map(|c| {
                 c.features()
-                    .map(|f| (f.id.clone(), f.name.clone()))
+                    .map(|f| {
+                        let mut aliases: Vec<String> = f
+                            .names
+                            .values()
+                            .chain(f.country.as_ref())
+                            .map(|a| a.to_lowercase())
+                            .collect();
+                        aliases.sort();
+                        aliases.dedup();
+                        (f.id.clone(), (f.name.clone(), aliases))
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -316,9 +348,14 @@ impl Registry {
 fn index_regions(
     dir: &Path,
     d: &DatasetConfig,
-    names: &BTreeMap<String, String>,
+    names: &BTreeMap<String, (String, Vec<String>)>,
 ) -> Result<BTreeMap<String, Region>> {
-    let name = |code: &str| names.get(code).cloned().unwrap_or_else(|| code.to_owned());
+    let name = |code: &str| {
+        names
+            .get(code)
+            .map_or_else(|| code.to_owned(), |(n, _)| n.clone())
+    };
+    let aliases = |code: &str| names.get(code).map(|(_, a)| a.clone()).unwrap_or_default();
     let mut regions = BTreeMap::new();
     match (&d.file, &d.files) {
         (Some(file), None) => {
@@ -338,6 +375,7 @@ fn index_regions(
                 for code in codes {
                     regions.entry(code.clone()).or_insert_with(|| Region {
                         name: name(&code),
+                        aliases: aliases(&code),
                         code,
                         file: path.clone(),
                         column: Some(column.clone()),
@@ -351,6 +389,7 @@ fn index_regions(
                     Region {
                         code: "world".into(),
                         name: "World".into(),
+                        aliases: Vec::new(),
                         file: path.clone(),
                         column: None,
                         provenance,
@@ -386,6 +425,7 @@ fn index_regions(
                     code.to_owned(),
                     Region {
                         name: name(code),
+                        aliases: aliases(code),
                         code: code.to_owned(),
                         provenance: provenance(&path, d),
                         file: path,

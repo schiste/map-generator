@@ -576,3 +576,64 @@ async fn custom_maps_of_several_regions_and_recipes() {
         .contains("colour-water"));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[tokio::test]
+async fn regions_by_iso2_and_names_in_other_languages() {
+    // Two countries in Natural Earth's Admin-0 layout, as the context layer
+    // and as a dataset.
+    let dir =
+        std::env::temp_dir().join(format!("mapgen-server-test-aliases-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let country = |a3: &str, a2: &str, name: &str, fr: &str, x: f64| {
+        format!(
+            r#"{{"type":"Feature","properties":{{"ADM0_A3":"{a3}","ISO_A2_EH":"{a2}","NAME":"{name}","NAME_FR":"{fr}"}},"geometry":{{"type":"Polygon","coordinates":[[[{x},45],[{x1},45],[{x1},46],[{x},46],[{x},45]]]}}}}"#,
+            x1 = x + 1.0
+        )
+    };
+    std::fs::write(
+        dir.join("countries.geojson"),
+        format!(
+            r#"{{"type":"FeatureCollection","features":[{},{}]}}"#,
+            country("DEU", "DE", "Germany", "Allemagne", 10.0),
+            country("NLD", "NL", "Netherlands", "Pays-Bas", 12.0)
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("datasets.toml"),
+        "[context]\ncountries = \"countries.geojson\"\n\n[[dataset]]\nid = \"countries\"\ntitle = \"Countries\"\npreset = \"ne-admin0\"\nfile = \"countries.geojson\"\n",
+    )
+    .unwrap();
+    let settings = Settings {
+        data_dir: dir.clone(),
+        cache_dir: None,
+        cache_max_bytes: 0,
+        max_concurrent: 2,
+        render_timeout: Duration::from_secs(20),
+        www_dir: None,
+        max_width: 4000,
+    };
+    let app = app(Arc::new(AppState::new(settings).unwrap()));
+    for path in [
+        "DEU,NLD",
+        "de,nl",
+        "Allemagne,Pays-Bas",
+        "germany,NETHERLANDS",
+    ] {
+        let r = get(&app, &format!("/api/v1/maps/countries/{path}.svg")).await;
+        assert_eq!(r.status, StatusCode::OK, "{path}: {}", r.text());
+        assert_eq!(
+            r.header("content-location"),
+            "/api/v1/maps/countries/DEU,NLD.svg",
+            "{path}"
+        );
+    }
+    assert_eq!(
+        get(&app, "/api/v1/maps/countries/Atlantis.svg")
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
