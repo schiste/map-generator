@@ -96,7 +96,12 @@ const requireData = process.env.MAPGEN_REQUIRE_DATA === "1";
 const skipUnless = (ok) => (ok || requireData ? false : "no data/ (run scripts/fetch-data.sh)");
 const data = join(repo, "data");
 const examples = join(repo, "docs", "examples");
-const hasNE = ["ne_10m_admin_0.geojson", "ne_10m_admin_1.geojson", "ne_10m_lakes.geojson"].every((f) =>
+const hasNE = [
+  "ne_10m_admin_0.geojson",
+  "ne_10m_admin_1.geojson",
+  "ne_10m_lakes.geojson",
+  "ne_10m_disputed_lines.geojson",
+].every((f) =>
   existsSync(join(data, f)),
 );
 const ne = hasNE || requireData
@@ -104,6 +109,7 @@ const ne = hasNE || requireData
       admin0: read(join(data, "ne_10m_admin_0.geojson")),
       admin1: read(join(data, "ne_10m_admin_1.geojson")),
       lakes: read(join(data, "ne_10m_lakes.geojson")),
+      disputed: read(join(data, "ne_10m_disputed_lines.geojson")),
     }
   : null;
 
@@ -112,6 +118,7 @@ function withContext(subject, layerSpec) {
   gen.setSubject(subject, layerSpec);
   gen.setContext(ne.admin0);
   gen.setLakes(ne.lakes);
+  gen.setDisputed(ne.disputed);
   return gen;
 }
 
@@ -137,10 +144,23 @@ test("parity: Europe (continent filter + bbox preset)", { skip: skipUnless(hasNE
   assert.equal(out.svg, read(join(examples, "europe.svg")));
 });
 
+test("parity: South America (curved label along Chile)", { skip: skipUnless(hasNE) }, () => {
+  const out = withContext(ne.admin0, { dataset: "ne-admin0", filterProperty: "CONTINENT" }).render({
+    region: "South America",
+    bbox: "south-america",
+    labels: true,
+    width: 700,
+    title: "South America",
+  });
+  assert.match(out.svg, /<textPath href="#label-path-CHL"/);
+  assert.equal(out.svg, read(join(examples, "south-america.svg")));
+});
+
 test("parity: world map (Equal Earth, seam splitting)", { skip: skipUnless(hasNE) }, () => {
   const gen = new MapGenerator();
   gen.setSubject(ne.admin0, { dataset: "ne-admin0" });
   gen.setLakes(ne.lakes);
+  gen.setDisputed(ne.disputed);
   const out = gen.render({ frame: "world", theme: "dark", padding: 10, width: 1200, title: "World" });
   assert.equal(out.projection, "equal-earth");
   assert.equal(out.svg, read(join(examples, "world-dark.svg")));
@@ -153,5 +173,14 @@ test("parity: France régions (geoBoundaries, credited)", { skip: skipUnless(has
     dataset: "geoboundaries",
     attribution: `${lic.source} (${lic.license}) via ${lic.via}`,
   }).render({ labels: true, credit: true, width: 900, title: "France — régions" });
-  assert.equal(out.svg, read(join(examples, "france-regions.svg")));
+  // The gallery map is rendered from a GeoPackage made by `mapgen convert
+  // --ids-from`, which replaces geoBoundaries' obsolete code for Corsica
+  // (FR-20R) with the current one (FR-COR). The id also changes the order of
+  // the paths, and of the border runs within each border path. Everything
+  // else must be identical.
+  const sortRuns = (line) =>
+    line.replace(/ d="([^"]*)"/, (_, d) => ` d="${d.split(/(?=M)/).sort().join("")}"`);
+  const lines = (svg) =>
+    svg.replaceAll('id="FR-20R"', 'id="FR-COR"').split("\n").map(sortRuns).sort();
+  assert.deepEqual(lines(out.svg), lines(read(join(examples, "france-regions.svg"))));
 });

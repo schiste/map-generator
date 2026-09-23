@@ -18,6 +18,8 @@ pub struct LayerQuery {
     pub name_column: String,
     /// Column compared against the region code (e.g. ISO3 `FRA`).
     pub filter_column: Option<String>,
+    /// Column holding the code of the enclosing unit (see `MapFeature::parent`).
+    pub parent_column: Option<String>,
     /// CSS class emitted on each path.
     pub class: String,
 }
@@ -33,6 +35,8 @@ pub enum Source {
     NaturalEarthAdmin1,
     /// Natural Earth 1:10m lakes.
     NaturalEarthLakes,
+    /// Natural Earth 1:10m disputed and claimed boundary lines.
+    NaturalEarthDisputedLines,
 }
 
 impl Source {
@@ -43,16 +47,19 @@ impl Source {
                 id_columns: ids.iter().map(|s| s.to_string()).collect(),
                 name_column: name.into(),
                 filter_column: filter.map(Into::into),
+                parent_column: None,
                 class: class.into(),
             }
         };
         match *self {
-            // `shapeISO` is only filled for some layers; `shapeID` is always set.
+            // `code`/`parent` are added by `mapgen convert --ids-from`; `shapeISO`
+            // is only filled for some layers; `shapeID` is always set.
             Source::GeoBoundaries => LayerQuery {
                 table: None,
+                parent_column: Some("parent".into()),
                 ..q(
                     String::new(),
-                    &["shapeISO", "shapeID"],
+                    &["code", "shapeISO", "shapeID"],
                     "shapeName",
                     Some("shapeGroup"),
                     "subdivision",
@@ -65,19 +72,30 @@ impl Source {
                 Some("ADM0_A3"),
                 "country",
             ),
-            Source::NaturalEarthAdmin1 => q(
-                "ne_10m_admin_1_states_provinces".into(),
-                &["iso_3166_2", "adm1_code"],
-                "name",
-                Some("adm0_a3"),
-                "subdivision",
-            ),
+            // `region_cod` groups e.g. French départements into régions.
+            Source::NaturalEarthAdmin1 => LayerQuery {
+                parent_column: Some("region_cod".into()),
+                ..q(
+                    "ne_10m_admin_1_states_provinces".into(),
+                    &["iso_3166_2", "adm1_code"],
+                    "name",
+                    Some("adm0_a3"),
+                    "subdivision",
+                )
+            },
             Source::NaturalEarthLakes => q(
                 "ne_10m_lakes".into(),
                 &["ne_id", "name"],
                 "name",
                 None,
                 "lake",
+            ),
+            Source::NaturalEarthDisputedLines => q(
+                "ne_10m_admin_0_boundary_lines_disputed_areas".into(),
+                &["ne_id"],
+                "NAME",
+                None,
+                "disputed",
             ),
         }
     }
@@ -113,6 +131,37 @@ pub fn read_layer(
     match Format::of(path)? {
         Format::GeoPackage => read_gpkg(path, query, region),
         Format::GeoJson => Ok(filter_rows(geojson::read_rows(path, query)?, query, region)),
+    }
+}
+
+/// [`read_layer`] limited to features whose bounding box intersects `bbox`
+/// (`[min_lon, min_lat, max_lon, max_lat]`). Fast on GeoPackages with an
+/// R-tree index; GeoJSON is still parsed in full, then filtered.
+pub fn read_layer_in(
+    path: &Path,
+    query: &LayerQuery,
+    region: Option<&str>,
+    bbox: Option<[f64; 4]>,
+) -> Result<Vec<MapFeature>> {
+    match Format::of(path)? {
+        #[cfg(feature = "gpkg")]
+        Format::GeoPackage => crate::gpkg::read_features_in(path, query, region, bbox),
+        #[cfg(not(feature = "gpkg"))]
+        Format::GeoPackage => Err(Error::GeoPackageUnsupported),
+        Format::GeoJson => {
+            let mut v = read_layer(path, query, region)?;
+            if let Some(b) = bbox {
+                v.retain(|f| {
+                    geo::BoundingRect::bounding_rect(&f.geometry).is_some_and(|r| {
+                        r.min().x <= b[2]
+                            && r.max().x >= b[0]
+                            && r.min().y <= b[3]
+                            && r.max().y >= b[1]
+                    })
+                });
+            }
+            Ok(v)
+        }
     }
 }
 

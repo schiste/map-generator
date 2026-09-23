@@ -18,8 +18,21 @@ pub fn read_features(
     query: &LayerQuery,
     region: Option<&str>,
 ) -> Result<Vec<MapFeature>> {
+    read_features_in(path, query, region, None)
+}
+
+/// [`read_features`] limited to features whose bounding box intersects
+/// `bbox` (`[min_lon, min_lat, max_lon, max_lat]`). Uses the GeoPackage R-tree
+/// index when the file has one (as files written by `mapgen convert` do).
+pub fn read_features_in(
+    path: &Path,
+    query: &LayerQuery,
+    region: Option<&str>,
+    bbox: Option<[f64; 4]>,
+) -> Result<Vec<MapFeature>> {
     let conn = open(path)?;
-    let table = query.table.as_deref().ok_or(Error::MissingTable)?;
+    let table = resolve_table(&conn, query)?;
+    let table = table.as_str();
     let geom_col = geometry_column(&conn, table)?;
     let columns = table_columns(&conn, table)?;
     let has = |c: &str| columns.iter().any(|x| x.eq_ignore_ascii_case(c));
@@ -33,27 +46,44 @@ pub fn read_features(
         select.push(ident(c)?);
     }
     select.push(ident(&query.name_column)?);
+    match query.parent_column.as_deref().filter(|c| has(c)) {
+        Some(c) => select.push(ident(c)?),
+        None => select.push("NULL".into()),
+    }
     select.push(ident(&geom_col)?);
 
     let mut sql = format!("SELECT {} FROM {}", select.join(", "), ident(table)?);
-    let filter = match (&query.filter_column, region) {
-        (Some(col), Some(code)) => {
-            sql.push_str(&format!(" WHERE {} = ?1", ident(col)?));
-            Some(code)
-        }
-        _ => None,
-    };
+    let mut conditions: Vec<String> = Vec::new();
+    let mut params: Vec<Value> = Vec::new();
+    if let (Some(col), Some(code)) = (&query.filter_column, region) {
+        params.push(Value::Text(code.to_owned()));
+        conditions.push(format!("{} = ?{}", ident(col)?, params.len()));
+    }
+    if let (Some(b), Some((rtree, pk))) = (bbox, rtree_index(&conn, table, &geom_col)?) {
+        let n = params.len();
+        params.extend([b[2], b[0], b[3], b[1]].map(Value::Real));
+        conditions.push(format!(
+            "{} IN (SELECT id FROM {} WHERE minx <= ?{} AND maxx >= ?{} AND miny <= ?{} AND maxy >= ?{})",
+            ident(&pk)?,
+            ident(&rtree)?,
+            n + 1,
+            n + 2,
+            n + 3,
+            n + 4
+        ));
+    }
+    if !conditions.is_empty() {
+        sql.push_str(" WHERE ");
+        sql.push_str(&conditions.join(" AND "));
+    }
 
     let mut stmt = conn.prepare(&sql)?;
-    let mut rows = match filter {
-        Some(code) => stmt.query([code])?,
-        None => stmt.query([])?,
-    };
+    let mut rows = stmt.query(rusqlite::params_from_iter(params))?;
 
     let n = id_cols.len();
     let mut features = Vec::new();
     while let Some(row) = rows.next()? {
-        let Some(blob) = row.get::<_, Option<Vec<u8>>>(n + 1)? else {
+        let Some(blob) = row.get::<_, Option<Vec<u8>>>(n + 2)? else {
             continue;
         };
         let ids = (0..n).map(|i| row.get::<_, Value>(i).map(value_to_string));
@@ -65,6 +95,7 @@ pub fn read_features(
             }
         }
         let name = meaningful(value_to_string(row.get(n)?));
+        let parent = meaningful(value_to_string(row.get(n + 1)?));
         let Some(id) = id.or_else(|| name.clone()) else {
             continue;
         };
@@ -73,6 +104,7 @@ pub fn read_features(
             name: name.unwrap_or_else(|| id.clone()),
             id,
             class: query.class.clone(),
+            parent,
             geometry,
         });
     }
@@ -83,7 +115,8 @@ pub fn read_features(
 /// Distinct non-empty values of the query's filter column, sorted.
 pub fn distinct_values(path: &Path, query: &LayerQuery) -> Result<Vec<String>> {
     let conn = open(path)?;
-    let table = query.table.as_deref().ok_or(Error::MissingTable)?;
+    let table = resolve_table(&conn, query)?;
+    let table = table.as_str();
     let col = query
         .filter_column
         .as_deref()
@@ -115,6 +148,44 @@ fn value_to_string(v: Value) -> Option<String> {
         Value::Real(r) => Some(r.to_string()),
         Value::Text(s) => Some(s),
     }
+}
+
+/// The query's table, or the only feature table of the file (e.g. one written
+/// by `mapgen convert` from a geoBoundaries GeoJSON).
+fn resolve_table(conn: &Connection, query: &LayerQuery) -> Result<String> {
+    if let Some(t) = &query.table {
+        return Ok(t.clone());
+    }
+    let mut stmt =
+        conn.prepare("SELECT table_name FROM gpkg_geometry_columns ORDER BY table_name")?;
+    let tables = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    match tables.as_slice() {
+        [only] => Ok(only.clone()),
+        _ => Err(Error::MissingTable),
+    }
+}
+
+/// The R-tree index table and primary-key column of a feature table, if the
+/// file has the standard GeoPackage R-tree extension for it.
+fn rtree_index(conn: &Connection, table: &str, geom: &str) -> Result<Option<(String, String)>> {
+    let name = format!("rtree_{table}_{geom}");
+    let exists: bool = conn.query_row(
+        "SELECT count(*) > 0 FROM sqlite_master WHERE name = ?1 COLLATE NOCASE",
+        [&name],
+        |r| r.get(0),
+    )?;
+    if !exists {
+        return Ok(None);
+    }
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", ident(table)?))?;
+    let pk = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, i64>(5)?)))?
+        .filter_map(|r| r.ok())
+        .find(|(_, pk)| *pk == 1)
+        .map(|(name, _)| name);
+    Ok(pk.map(|pk| (name, pk)))
 }
 
 fn geometry_column(conn: &Connection, table: &str) -> Result<String> {

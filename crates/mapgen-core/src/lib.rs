@@ -9,12 +9,15 @@
 //! ```
 
 pub mod antimeridian;
+#[cfg(feature = "proj")]
+pub mod epsg;
 pub mod error;
 pub mod feature;
 pub mod frame;
 pub mod html;
 pub mod labels;
 mod math;
+pub mod panel;
 pub mod pipeline;
 pub mod projection;
 pub mod simplify;
@@ -23,9 +26,9 @@ pub mod theme;
 pub mod validate;
 
 pub use error::{Error, Result};
-pub use feature::MapFeature;
+pub use feature::{MapFeature, MapLine};
 pub use frame::{FrameMode, GeoBBox};
 pub use html::html_page;
-pub use pipeline::{render, MapLayers, RenderOptions, Rendered};
+pub use pipeline::{render, InsetInfo, InsetMode, MapLayers, RenderOptions, Rendered};
 pub use projection::{MapProjection, Projection, ProjectionChoice};
 pub use theme::{Color, Theme};

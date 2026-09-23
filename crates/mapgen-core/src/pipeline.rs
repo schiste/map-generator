@@ -1,16 +1,25 @@
-use geo::{Area, BoundingRect, CoordsIter, MapCoords};
-use geo_types::{coord, LineString, MultiPolygon, Polygon, Rect};
+use std::collections::BTreeSet;
 
-use crate::antimeridian::{covering_arc, split_at_seam, wrap_longitude};
+use geo::{BoundingRect, Contains, MapCoords};
+use geo_types::{coord, MultiPolygon, Point, Polygon, Rect};
+use rstar::primitives::{GeomWithData, Rectangle};
+use rstar::RTree;
+
 use crate::error::{Error, Result};
-use crate::feature::MapFeature;
-use crate::frame::{anchor, clip_to_rect, FrameMode};
+use crate::feature::{MapFeature, MapLine};
+use crate::frame::{anchor as frame_anchor, clusters, Cluster, FrameMode};
+use crate::panel::{build_panel, GeoExtent, Panel, PanelSpec, Placement};
 use crate::projection::{
-    EqualEarth, LambertAzimuthalEqualArea, MapProjection, Projection, ProjectionChoice,
+    one_sixth_parallels, Albers, EqualEarth, LambertAzimuthalEqualArea, LambertConformalConic,
+    MapProjection, Projection, ProjectionChoice,
 };
-use crate::simplify::{simplify_shared, vw_epsilon};
-use crate::svg::{write_svg, SvgDocument, Viewport};
+use crate::svg::{write_svg, SvgDocument};
 use crate::theme::Theme;
+
+/// Far-away parts smaller than this share of the main landmass get no inset
+/// (0.025 %: keeps Mayotte, Saint-Pierre-et-Miquelon or Puerto Rico next to
+/// their mainland, leaves out Guam or American Samoa next to the US).
+const INSET_MIN_SHARE: f64 = 2.5e-4;
 
 /// The features to draw, in WGS84.
 #[derive(Debug, Clone, Default)]
@@ -21,6 +30,8 @@ pub struct MapLayers {
     pub context: Vec<MapFeature>,
     /// Lakes, drawn in `water` colour above the land.
     pub lakes: Vec<MapFeature>,
+    /// Disputed or claimed boundaries, drawn dashed.
+    pub disputed: Vec<MapLine>,
 }
 
 impl MapLayers {
@@ -32,6 +43,17 @@ impl MapLayers {
         self.context
             .retain(|c| Some(c.id.as_str()) != region && !subject.iter().any(|s| s.id == c.id));
     }
+}
+
+/// Whether far-away parts of the mapped area get inset boxes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InsetMode {
+    /// With `FrameMode::Auto`, parts left out of the main frame (overseas
+    /// territories, Alaska, Hawaii…) are drawn in boxes in the map's corners.
+    #[default]
+    Auto,
+    /// Far-away parts are left out (and reported).
+    None,
 }
 
 /// End-to-end rendering options.
@@ -52,13 +74,26 @@ pub struct RenderOptions {
     /// Emit `var(--mg-*, …)` colours for restyling from page CSS.
     pub css_vars: bool,
     pub labels: bool,
+    /// Place labels of small regions outside them, with a leader line.
+    pub label_leaders: bool,
+    /// Curve labels along long, thin regions.
+    pub label_curved: bool,
+    /// Smallest label size, as a fraction of the theme's label size.
+    pub label_min_scale: f64,
     /// Simplification tolerance in output pixels; `0.0` disables it.
     pub simplify_px: f64,
     /// Islands and lakes smaller than this many px² are dropped (a subject
     /// region always keeps its largest part).
     pub min_area_px: f64,
+    /// Neighbouring-country vertices within this many pixels of the mapped
+    /// area's outline are moved onto it (fixes gaps and doubled borders when
+    /// the two come from different datasets). `0.0` disables it.
+    pub snap_px: f64,
     pub projection: ProjectionChoice,
     pub frame: FrameMode,
+    pub insets: InsetMode,
+    /// At most this many insets; smaller far-away parts are left out.
+    pub max_insets: usize,
     /// Extra room around the framed features, as a fraction of the frame size.
     pub margin: f64,
     /// Override the central meridian.
@@ -77,14 +112,28 @@ impl Default for RenderOptions {
             theme: Theme::default(),
             css_vars: false,
             labels: false,
+            label_leaders: true,
+            label_curved: true,
+            label_min_scale: 0.7,
             simplify_px: 0.5,
             min_area_px: 0.5,
+            snap_px: 2.0,
             projection: ProjectionChoice::Auto,
             frame: FrameMode::Auto,
+            insets: InsetMode::Auto,
+            max_insets: 6,
             margin: 0.04,
             center_lon: None,
         }
     }
+}
+
+/// An inset drawn on the map.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InsetInfo {
+    /// Ids of the regions in the inset.
+    pub ids: Vec<String>,
+    pub projection: String,
 }
 
 /// A rendered map plus facts about how it was made.
@@ -94,8 +143,10 @@ pub struct Rendered {
     pub width: u32,
     pub height: u32,
     pub projection: MapProjection,
-    /// Ids of subject features that fell entirely outside the frame.
+    /// Ids of subject features that appear nowhere (outside the frame and not
+    /// in an inset).
     pub outside_frame: Vec<String>,
+    pub insets: Vec<InsetInfo>,
 }
 
 /// Renders a map. Output is a pure function of the inputs: layers are sorted
@@ -104,116 +155,134 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
     if layers.subject.is_empty() {
         return Err(Error::Empty);
     }
-    let sorted = |v: &[MapFeature]| {
-        let mut v = v.to_vec();
-        v.sort_by(|a, b| a.id.cmp(&b.id));
-        v
-    };
-    let mut subject = sorted(&layers.subject);
-    let mut context = sorted(&layers.context);
-    let mut lakes = sorted(&layers.lakes);
+    let subject = sorted(&layers.subject, |f| &f.id);
+    let context = sorted(&layers.context, |f| &f.id);
+    let lakes = sorted(&layers.lakes, |f| &f.id);
+    let disputed = sorted(&layers.disputed, |l| &l.id);
 
-    let mut anchor = anchor(&subject, opts.frame);
+    // Frame planning: the main cluster, plus far-away clusters for insets.
+    let polys: Vec<(usize, Polygon<f64>)> = subject
+        .iter()
+        .enumerate()
+        .flat_map(|(i, f)| f.geometry.0.iter().map(move |p| (i, p.clone())))
+        .collect();
+    let mut main_weight = 0.0;
+    let (anchor, inset_clusters) = match opts.frame {
+        FrameMode::Auto => {
+            let plain: Vec<Polygon<f64>> = polys.iter().map(|(_, p)| p.clone()).collect();
+            let all = clusters(&plain);
+            let main = all.first().ok_or(Error::Empty)?;
+            main_weight = main.weight;
+            let anchor = MultiPolygon(main.members.iter().map(|&i| plain[i].clone()).collect());
+            let insets: Vec<Cluster> = match opts.insets {
+                InsetMode::Auto => all
+                    .iter()
+                    .skip(1)
+                    .filter(|c| c.weight >= main.weight * INSET_MIN_SHARE)
+                    .take(opts.max_insets)
+                    .cloned()
+                    .collect(),
+                InsetMode::None => Vec::new(),
+            };
+            (Some(anchor), insets)
+        }
+        mode => (frame_anchor(&subject, mode), Vec::new()),
+    };
     if anchor.as_ref().is_some_and(|a| a.0.is_empty()) {
         return Err(Error::Empty);
     }
-    let projection = choose_projection(anchor.as_ref(), opts);
+    let projection = choose_projection(anchor.as_ref(), opts, opts.projection, opts.center_lon)?;
 
-    if let Some(a) = &anchor {
-        let extent = GeoExtent::of(a);
-        context.retain(|f| extent.near(&f.geometry));
-        lakes.retain(|f| extent.near(&f.geometry));
-    }
-
-    // Project everything (cutting along the seam first when there is one).
-    let lon0 = projection.lon0();
-    let prepare = |g: &MultiPolygon<f64>| {
-        let g = if projection.has_seam() {
-            split_at_seam(g, lon0)
-        } else {
-            g.clone()
-        };
-        g.map_coords(|c| {
-            let (x, y) = projection.project(c.x, c.y);
-            coord! { x: x, y: y }
-        })
-    };
-    for f in subject
-        .iter_mut()
-        .chain(context.iter_mut())
-        .chain(lakes.iter_mut())
-    {
-        f.geometry = prepare(&f.geometry);
-    }
-    anchor = anchor.map(|a| prepare(&a));
-
-    // Frame: a rectangle around the anchor, or the globe outline.
-    let (frame, water) = match &anchor {
-        Some(a) => {
-            let b = a.bounding_rect().ok_or(Error::Empty)?;
-            let m = match opts.frame {
-                FrameMode::BBox(_) => 0.0,
-                _ => opts.margin.max(0.0) * b.width().max(b.height()),
-            };
-            let r = Rect::new(
-                coord! { x: b.min().x - m, y: b.min().y - m },
-                coord! { x: b.max().x + m, y: b.max().y + m },
-            );
-            (r, MultiPolygon(vec![r.to_polygon()]))
-        }
-        None => {
-            let sphere = sphere_outline(&projection);
-            (
-                sphere.bounding_rect().ok_or(Error::Empty)?,
-                MultiPolygon(vec![sphere]),
-            )
-        }
-    };
-    let viewport = fit_viewport(frame, opts.width, opts.padding)?;
-
-    // Simplify each layer as a whole so shared borders stay shared.
-    let eps = if opts.simplify_px > 0.0 {
-        vw_epsilon(opts.simplify_px, viewport.scale)
-    } else {
-        0.0
-    };
-    for layer in [&mut subject, &mut context, &mut lakes] {
-        let geoms: Vec<_> = layer.iter().map(|f| f.geometry.clone()).collect();
-        for (f, g) in layer.iter_mut().zip(simplify_shared(&geoms, eps)) {
-            f.geometry = g;
-        }
-    }
-
-    // Clip to the frame and drop specks.
-    let min_area = opts.min_area_px.max(0.0) / (viewport.scale * viewport.scale);
-    let clip = anchor.is_some();
-    let finish = |layer: &mut Vec<MapFeature>, keep_largest: bool| {
-        for f in layer.iter_mut() {
-            if clip {
-                f.geometry = clip_to_rect(&f.geometry, frame);
-            }
-            f.geometry = cull(&f.geometry, min_area, keep_largest);
-        }
-    };
-    finish(&mut subject, true);
-    finish(&mut context, false);
-    finish(&mut lakes, false);
-    let outside_frame = subject
+    let in_inset: BTreeSet<usize> = inset_clusters
         .iter()
-        .filter(|f| f.geometry.0.is_empty())
-        .map(|f| f.id.clone())
+        .flat_map(|c| c.members.iter().copied())
         .collect();
-    for layer in [&mut subject, &mut context, &mut lakes] {
-        layer.retain(|f| !f.geometry.0.is_empty());
+    let main = build_panel(PanelSpec {
+        subject: restrict(&subject, &polys, |i| !in_inset.contains(&i)),
+        context: &context,
+        lakes: &lakes,
+        disputed: &disputed,
+        anchor,
+        frame_mode: opts.frame,
+        projection: projection.clone(),
+        placement: Placement::Canvas {
+            width: opts.width,
+            padding: opts.padding,
+        },
+        opts,
+        label_size: opts.theme.label_size,
+    })?;
+    let (width, height) = (f64::from(opts.width), main.viewport.canvas_height);
+
+    let grid = LandGrid::new(&main, width, height);
+    let mut panels = vec![main];
+    let mut boxes: Vec<Rect<f64>> = Vec::new();
+    let mut insets = Vec::new();
+    for cluster in &inset_clusters {
+        let anchor = MultiPolygon(
+            cluster
+                .members
+                .iter()
+                .map(|&i| polys[i].1.clone())
+                .collect(),
+        );
+        // EPSG codes are for the main map; insets pick their own projection.
+        let choice = match opts.projection {
+            ProjectionChoice::Epsg(_) => ProjectionChoice::Auto,
+            c => c,
+        };
+        let proj = choose_projection(Some(&anchor), opts, choice, None)?;
+        let share = if main_weight > 0.0 {
+            cluster.weight / main_weight
+        } else {
+            1.0
+        };
+        let Some(size) = inset_size(&anchor, &proj, share, width, height) else {
+            continue;
+        };
+        let Some(b) = place_box(size, &grid, &boxes, width, height) else {
+            continue;
+        };
+        let members: BTreeSet<usize> = cluster.members.iter().copied().collect();
+        let panel = build_panel(PanelSpec {
+            subject: restrict(&subject, &polys, |i| members.contains(&i)),
+            context: &context,
+            lakes: &lakes,
+            disputed: &disputed,
+            anchor: Some(anchor),
+            frame_mode: FrameMode::Auto,
+            projection: proj,
+            placement: Placement::Box(b),
+            opts,
+            label_size: 0.9 * opts.theme.label_size,
+        })?;
+        if panel.subject.is_empty() {
+            continue;
+        }
+        boxes.push(b);
+        insets.push(InsetInfo {
+            ids: panel.subject.iter().map(|f| f.id.clone()).collect(),
+            projection: panel.projection.name(),
+        });
+        panels.push(panel);
     }
+
+    let shown: BTreeSet<&str> = panels
+        .iter()
+        .flat_map(|p| p.subject.iter().map(|f| f.id.as_str()))
+        .collect();
+    let outside_frame: Vec<String> = subject
+        .iter()
+        .map(|f| f.id.clone())
+        .filter(|id| !shown.contains(id.as_str()))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
 
     let svg = write_svg(&SvgDocument {
-        viewport,
-        water: &water,
-        context: &context,
-        subject: &subject,
-        lakes: &lakes,
-        labels: opts.labels,
+        width: opts.width,
+        height: height as u32,
+        panels: &panels,
         theme: &opts.theme,
         title: opts.title.as_deref(),
         attribution: opts.attribution.as_deref(),
@@ -223,130 +292,235 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
     });
     Ok(Rendered {
         svg,
-        width: viewport.width,
-        height: viewport.height,
+        width: opts.width,
+        height: height as u32,
         projection,
         outside_frame,
+        insets,
     })
 }
 
-fn choose_projection(anchor: Option<&MultiPolygon<f64>>, opts: &RenderOptions) -> MapProjection {
-    let (lon0, lat0, span) = match anchor {
-        Some(a) => {
-            let e = GeoExtent::of(a);
-            (
-                wrap_longitude(e.west + e.span / 2.0),
-                (e.south + e.north) / 2.0,
-                e.span,
-            )
-        }
-        None => (0.0, 0.0, 360.0),
-    };
-    let lon0 = opts.center_lon.unwrap_or(lon0);
-    let equal_earth = match opts.projection {
-        ProjectionChoice::Auto => anchor.is_none() || span > 200.0,
-        ProjectionChoice::Laea => false,
-        ProjectionChoice::EqualEarth => true,
-    };
-    if equal_earth {
-        MapProjection::EqualEarth(EqualEarth { lon0 })
-    } else {
-        MapProjection::Laea(LambertAzimuthalEqualArea { lon0, lat0 })
-    }
+fn sorted<T: Clone>(v: &[T], key: impl Fn(&T) -> &String) -> Vec<T> {
+    let mut v = v.to_vec();
+    v.sort_by(|a, b| key(a).cmp(key(b)));
+    v
 }
 
-/// Lon/lat extent that is aware of the antimeridian.
-struct GeoExtent {
-    west: f64,
-    span: f64,
-    south: f64,
-    north: f64,
-}
-
-impl GeoExtent {
-    fn of(mp: &MultiPolygon<f64>) -> GeoExtent {
-        let lons: Vec<f64> = mp.exterior_coords_iter().map(|c| c.x).collect();
-        let (west, span) = covering_arc(&lons).unwrap_or((0.0, 0.0));
-        let (south, north) = mp
-            .exterior_coords_iter()
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(s, n), c| {
-                (s.min(c.y), n.max(c.y))
-            });
-        GeoExtent {
-            west,
-            span,
-            south,
-            north,
+/// Features restricted to the polygons (by flat index) that `keep` accepts;
+/// features left with no polygon are dropped.
+fn restrict(
+    subject: &[MapFeature],
+    polys: &[(usize, Polygon<f64>)],
+    keep: impl Fn(usize) -> bool,
+) -> Vec<MapFeature> {
+    let mut parts: Vec<Vec<Polygon<f64>>> = vec![Vec::new(); subject.len()];
+    for (i, (owner, p)) in polys.iter().enumerate() {
+        if keep(i) {
+            parts[*owner].push(p.clone());
         }
     }
-
-    /// Cheap pre-filter: could `g` be visible in a frame around this extent?
-    fn near(&self, g: &MultiPolygon<f64>) -> bool {
-        let Some(b) = g.bounding_rect() else {
-            return false;
-        };
-        let pad_lon = self.span * 0.5 + 5.0;
-        let pad_lat = (self.north - self.south) * 0.5 + 5.0;
-        if b.max().y < self.south - pad_lat || b.min().y > self.north + pad_lat {
-            return false;
-        }
-        let (w, len) = (self.west - pad_lon, self.span + 2.0 * pad_lon);
-        len >= 360.0
-            || [-360.0, 0.0, 360.0, 720.0]
-                .iter()
-                .any(|s| b.min().x + s <= w + len && b.max().x + s >= w)
-    }
-}
-
-fn sphere_outline(p: &MapProjection) -> Polygon<f64> {
-    let lon0 = p.lon0();
-    let edge = |lon: f64, lats: &mut dyn Iterator<Item = f64>| -> Vec<_> {
-        lats.map(|lat| {
-            let (x, y) = p.project(lon, lat);
-            coord! { x: x, y: y }
+    subject
+        .iter()
+        .zip(parts)
+        .filter(|(_, p)| !p.is_empty())
+        .map(|(f, p)| MapFeature {
+            geometry: MultiPolygon(p),
+            ..f.clone()
         })
         .collect()
+}
+
+fn choose_projection(
+    anchor: Option<&MultiPolygon<f64>>,
+    opts: &RenderOptions,
+    choice: ProjectionChoice,
+    center_lon: Option<f64>,
+) -> Result<MapProjection> {
+    let e = anchor.map(GeoExtent::of);
+    let (lon0, lat0) = e.map_or((0.0, 0.0), |e| e.center());
+    let lon0 = center_lon.unwrap_or(lon0);
+    let (south, north) = e.map_or((-60.0, 80.0), |e| (e.south, e.north));
+    let span = e.map_or(360.0, |e| e.span);
+    let laea = || MapProjection::Laea(LambertAzimuthalEqualArea { lon0, lat0 });
+    let albers = |parallels: Option<(f64, f64)>| {
+        MapProjection::Albers(Albers {
+            lon0,
+            lat0,
+            parallels: parallels.unwrap_or_else(|| one_sixth_parallels(south, north)),
+        })
     };
-    let mut pts = edge(lon0 - 180.0, &mut (0..=180).map(|i| -90.0 + f64::from(i)));
-    pts.extend(edge(
-        lon0 + 180.0,
-        &mut (0..=180).map(|i| 90.0 - f64::from(i)),
-    ));
-    pts.push(pts[0]);
-    Polygon::new(LineString(pts), vec![])
-}
-
-fn cull(mp: &MultiPolygon<f64>, min_area: f64, keep_largest: bool) -> MultiPolygon<f64> {
-    if min_area <= 0.0 || mp.0.is_empty() {
-        return mp.clone();
-    }
-    let areas: Vec<f64> = mp.0.iter().map(|p| p.unsigned_area()).collect();
-    let largest = (0..areas.len())
-        .max_by(|&a, &b| areas[a].total_cmp(&areas[b]).then(b.cmp(&a)))
-        .unwrap_or(0);
-    MultiPolygon(
-        mp.0.iter()
-            .enumerate()
-            .filter(|&(i, _)| areas[i] >= min_area || (keep_largest && i == largest))
-            .map(|(_, p)| p.clone())
-            .collect(),
-    )
-}
-
-fn fit_viewport(frame: Rect<f64>, width: u32, padding: u32) -> Result<Viewport> {
-    let (dx, dy) = (frame.width(), frame.height());
-    let pad = f64::from(padding);
-    let inner_w = f64::from(width) - 2.0 * pad;
-    if dx <= 0.0 || dy <= 0.0 || inner_w <= 0.0 {
-        return Err(Error::DegenerateExtent);
-    }
-    let scale = inner_w / dx;
-    Ok(Viewport {
-        min_x: frame.min().x,
-        max_y: frame.max().y,
-        scale,
-        padding: pad,
-        width,
-        height: (dy * scale + 2.0 * pad).ceil() as u32,
+    Ok(match choice {
+        ProjectionChoice::Auto => {
+            // Conics suit regions wide in longitude at mid-latitudes; fixed
+            // frames (continent presets) keep the azimuthal default.
+            let conic = !matches!(opts.frame, FrameMode::BBox(_))
+                && span >= 45.0
+                && (20.0..=70.0).contains(&lat0.abs());
+            if anchor.is_none() || span > 200.0 {
+                MapProjection::EqualEarth(EqualEarth { lon0 })
+            } else if conic {
+                albers(None)
+            } else {
+                laea()
+            }
+        }
+        ProjectionChoice::Laea => laea(),
+        ProjectionChoice::EqualEarth => MapProjection::EqualEarth(EqualEarth { lon0 }),
+        ProjectionChoice::Albers { parallels } => albers(parallels),
+        ProjectionChoice::Lcc { parallels } => MapProjection::Lcc(LambertConformalConic {
+            lon0,
+            lat0,
+            parallels: parallels.unwrap_or_else(|| one_sixth_parallels(south, north)),
+        }),
+        #[cfg(feature = "proj")]
+        ProjectionChoice::Epsg(code) => {
+            MapProjection::Epsg(crate::epsg::EpsgProjection::new(code, lon0)?)
+        }
+        #[cfg(not(feature = "proj"))]
+        ProjectionChoice::Epsg(_) => return Err(Error::ProjUnavailable),
     })
+}
+
+/// Pixel size of an inset box, following the inset's aspect ratio (within
+/// 1:2.5). The long side is up to a quarter of the map's short side, scaled by
+/// the fourth root of the inset's area relative to the main landmass (so
+/// Alaska gets a full box, Hawaii or Réunion a smaller one), and at least 55 %.
+fn inset_size(
+    anchor: &MultiPolygon<f64>,
+    proj: &MapProjection,
+    share: f64,
+    width: f64,
+    height: f64,
+) -> Option<(f64, f64)> {
+    let b = anchor
+        .map_coords(|c| {
+            let (x, y) = proj.project(c.x, c.y);
+            coord! { x: x, y: y }
+        })
+        .bounding_rect()?;
+    if !(b.width() > 0.0 && b.height() > 0.0) {
+        return None;
+    }
+    let long = 0.25 * width.min(height) * (1.6 * share.max(0.0).powf(0.25)).clamp(0.55, 1.0);
+    let aspect = (b.width() / b.height()).clamp(0.4, 2.5);
+    Some(if aspect >= 1.0 {
+        (long, long / aspect)
+    } else {
+        (long * aspect, long)
+    })
+}
+
+/// Chooses where an inset box goes: corners first, then along the edges,
+/// minimising how much of the main map's land it covers and never
+/// overlapping another inset.
+fn place_box(
+    size: (f64, f64),
+    grid: &LandGrid,
+    taken: &[Rect<f64>],
+    width: f64,
+    height: f64,
+) -> Option<Rect<f64>> {
+    let (w, h) = size;
+    let m = 6.0;
+    if w + 2.0 * m > width || h + 2.0 * m > height {
+        return None;
+    }
+    let (x0, x1, y0, y1) = (m, width - m - w, m, height - m - h);
+    let mut candidates = vec![(x0, y1), (x1, y1), (x0, y0), (x1, y0)];
+    let steps = |from: f64, to: f64, step: f64| {
+        let n = ((to - from) / step).floor().max(0.0) as usize;
+        (0..=n).map(move |k| from + k as f64 * step)
+    };
+    candidates.extend(steps(x0, x1, w / 2.0).map(|x| (x, y1)));
+    candidates.extend(steps(y0, y1, h / 2.0).map(|y| (x0, y1 - (y - y0))));
+    candidates.extend(steps(y0, y1, h / 2.0).map(|y| (x1, y1 - (y - y0))));
+    candidates.extend(steps(x0, x1, w / 2.0).map(|x| (x, y0)));
+
+    let gap = 4.0;
+    candidates
+        .into_iter()
+        .map(|(x, y)| Rect::new(coord! { x: x, y: y }, coord! { x: x + w, y: y + h }))
+        .filter(|r| {
+            taken.iter().all(|t| {
+                r.max().x + gap <= t.min().x
+                    || t.max().x + gap <= r.min().x
+                    || r.max().y + gap <= t.min().y
+                    || t.max().y + gap <= r.min().y
+            })
+        })
+        .enumerate()
+        .min_by(|(ia, a), (ib, b)| grid.land_in(a).cmp(&grid.land_in(b)).then(ia.cmp(ib)))
+        .map(|(_, r)| r)
+}
+
+/// Coarse raster of where the main map's regions are, in pixels.
+struct LandGrid {
+    cell: f64,
+    cols: usize,
+    rows: usize,
+    land: Vec<bool>,
+}
+
+impl LandGrid {
+    fn new(panel: &Panel, width: f64, height: f64) -> LandGrid {
+        let cell = 6.0;
+        let (cols, rows) = (
+            (width / cell).ceil() as usize,
+            (height / cell).ceil() as usize,
+        );
+        let vp = panel.viewport;
+        let px: Vec<Polygon<f64>> = panel
+            .subject
+            .iter()
+            .flat_map(|f| f.geometry.0.iter())
+            .map(|p| {
+                p.map_coords(|c| {
+                    let (x, y) = vp.to_px(c.x, c.y);
+                    coord! { x: x, y: y }
+                })
+            })
+            .collect();
+        let tree: RTree<GeomWithData<Rectangle<[f64; 2]>, usize>> = RTree::bulk_load(
+            px.iter()
+                .enumerate()
+                .filter_map(|(i, p)| p.bounding_rect().map(|r| (i, r)))
+                .map(|(i, r)| {
+                    GeomWithData::new(
+                        Rectangle::from_corners([r.min().x, r.min().y], [r.max().x, r.max().y]),
+                        i,
+                    )
+                })
+                .collect(),
+        );
+        let mut land = vec![false; cols * rows];
+        for r in 0..rows {
+            for c in 0..cols {
+                let (x, y) = ((c as f64 + 0.5) * cell, (r as f64 + 0.5) * cell);
+                land[r * cols + c] = tree
+                    .locate_all_at_point(&[x, y])
+                    .any(|hit| px[hit.data].contains(&Point::new(x, y)));
+            }
+        }
+        LandGrid {
+            cell,
+            cols,
+            rows,
+            land,
+        }
+    }
+
+    fn land_in(&self, r: &Rect<f64>) -> usize {
+        let (c0, c1) = (
+            (r.min().x / self.cell).floor().max(0.0) as usize,
+            ((r.max().x / self.cell).ceil() as usize).min(self.cols),
+        );
+        let (r0, r1) = (
+            (r.min().y / self.cell).floor().max(0.0) as usize,
+            ((r.max().y / self.cell).ceil() as usize).min(self.rows),
+        );
+        (r0..r1)
+            .flat_map(|row| (c0..c1).map(move |col| row * self.cols + col))
+            .filter(|&i| self.land[i])
+            .count()
+    }
 }

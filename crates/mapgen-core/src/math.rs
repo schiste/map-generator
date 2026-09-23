@@ -22,6 +22,18 @@ pub fn hypot(x: f64, y: f64) -> f64 {
     libm::hypot(x, y)
 }
 
+pub fn tan(x: f64) -> f64 {
+    libm::tan(x)
+}
+
+pub fn ln(x: f64) -> f64 {
+    libm::log(x)
+}
+
+pub fn pow(x: f64, y: f64) -> f64 {
+    libm::pow(x, y)
+}
+
 pub fn atan2(y: f64, x: f64) -> f64 {
     libm::atan2(y, x)
 }

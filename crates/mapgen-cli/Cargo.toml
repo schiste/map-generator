@@ -16,7 +16,15 @@ path = "src/main.rs"
 mapgen-core.workspace = true
 mapgen-data = { workspace = true, features = ["gpkg"] }
 anyhow.workspace = true
+geo.workspace = true
+geo-types.workspace = true
 rayon.workspace = true
 clap = { version = "4", features = ["derive"] }
 serde.workspace = true
 serde_json.workspace = true
+
+[features]
+# EPSG projections through PROJ (`--projection epsg:5070`); needs libproj.
+proj = ["mapgen-core/proj"]
+# ...or build PROJ from source.
+bundled-proj = ["mapgen-core/bundled-proj"]

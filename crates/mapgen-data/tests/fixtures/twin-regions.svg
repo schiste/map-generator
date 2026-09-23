@@ -2,13 +2,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="400" height="352" viewBox="0 0 400 352">
 <title>Twin regions</title>
 <style>
-path{stroke-linejoin:round;fill-rule:evenodd}
+path{fill-rule:evenodd}
 .mg-background{fill:#ffffff}
 .mg-water{fill:#c6ecff}
-.mg-context{fill:#f6e1b9;stroke:#a08070;stroke-width:0.4}
-.mg-land{fill:#fefee9;stroke:#646464;stroke-width:0.5}
+.mg-context{fill:#f6e1b9}
+.mg-land{fill:#fefee9}
 .mg-lake{fill:#c6ecff;stroke:#0978ab;stroke-width:0.4}
+.mg-border{fill:none;stroke-linejoin:round;stroke-linecap:round}
+.mg-border-context{stroke:#a08070;stroke-width:0.4}
+.mg-border-internal{stroke:#646464;stroke-width:0.5}
+.mg-border-parent{stroke:#646464;stroke-width:1}
+.mg-border-outline{stroke:#646464;stroke-width:0.8}
+.mg-border-disputed{stroke:#646464;stroke-width:0.8;stroke-dasharray:3.2 2}
 .mg-label{fill:#333333;font:11px sans-serif;text-anchor:middle;dominant-baseline:central;paint-order:stroke;stroke:#fefee9;stroke-width:2.5px;stroke-linejoin:round}
+.mg-leader{fill:none;stroke:#333333;stroke-width:0.6}
+.mg-inset-frame{fill:none;stroke:#646464;stroke-width:1}
 .mg-credit{fill:#333333;font:9px sans-serif;text-anchor:end;opacity:.75}
 </style>
 <rect id="background" class="mg-background" width="400" height="352"/>
@@ -17,8 +25,12 @@ path{stroke-linejoin:round;fill-rule:evenodd}
 <path id="XA-01" class="mg-land region" data-name="Westland" d="M230 256.8L236.8 156L229.5 55.2L159.6 14.8L89.4 54.7L74.3 155.3L87.4 256.3ZM173.2 135.8L145 135.7L144.8 176.1L173.1 176.2ZM43.9 306.2L15.3 305.8L14.8 336L43.5 336.4Z"><title>Westland</title></path>
 <path id="XA-02" class="mg-land region" data-name="East &amp; Co" d="M230 256.8L272.9 276.8L315.4 246.2L372.6 255.6L385.2 154.6L355.5 54.2L299.3 34.6L229.5 55.2L236.8 156Z"><title>East &amp; Co</title></path>
 </g>
+<g id="borders">
+<path class="mg-border mg-border-internal" d="M229.5 55.2L236.8 156L230 256.8"/>
+<path class="mg-border mg-border-outline" d="M229.5 55.2L159.6 14.8L89.4 54.7L74.3 155.3L87.4 256.3L230 256.8M173.2 135.8L173.1 176.2L144.8 176.1L145 135.7L173.2 135.8M43.9 306.2L43.5 336.4L14.8 336L15.3 305.8L43.9 306.2M229.5 55.2L299.3 34.6L355.5 54.2L385.2 154.6L372.6 255.6L315.4 246.2L272.9 276.8L230 256.8"/>
+</g>
 <g id="labels">
-<text class="mg-label" x="111.1" y="135.8">Westland</text>
-<text class="mg-label" x="310.9" y="155.7">East &amp; Co</text>
+<text class="mg-label" x="159.3" y="79.6">Westland</text>
+<text class="mg-label" x="310.1" y="162.7">East &amp; Co</text>
 </g>
 </svg>

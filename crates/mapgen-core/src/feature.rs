@@ -1,4 +1,4 @@
-use geo_types::MultiPolygon;
+use geo_types::{MultiLineString, MultiPolygon};
 
 /// A single administrative area ready to be rendered.
 ///
@@ -12,5 +12,16 @@ pub struct MapFeature {
     pub name: String,
     /// CSS class, e.g. `country` or `subdivision`.
     pub class: String,
+    /// Code of the enclosing unit (e.g. the région of a département). Borders
+    /// between features with different parents are drawn as parent borders.
+    pub parent: Option<String>,
     pub geometry: MultiPolygon<f64>,
+}
+
+/// A line feature, such as a disputed boundary.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapLine {
+    pub id: String,
+    pub name: String,
+    pub geometry: MultiLineString<f64>,
 }

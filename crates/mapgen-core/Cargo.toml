@@ -14,3 +14,10 @@ geo-types.workspace = true
 thiserror.workspace = true
 libm.workspace = true
 rstar = "0.12"
+proj = { version = "0.31", optional = true, default-features = false }
+
+[features]
+# EPSG projections through the PROJ C library (`--projection epsg:5070`).
+proj = ["dep:proj"]
+# Build PROJ from source instead of linking a system installation.
+bundled-proj = ["proj", "proj/bundled_proj"]

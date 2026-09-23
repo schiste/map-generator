@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mapgen_core::frame::BBOX_PRESETS;
 use mapgen_core::{
-    render, Color, FrameMode, GeoBBox, MapFeature, MapLayers, MapProjection, ProjectionChoice,
+    render, Color, FrameMode, GeoBBox, InsetMode, MapFeature, MapLayers, MapLine, ProjectionChoice,
     RenderOptions, Theme,
 };
 use mapgen_data::{LayerQuery, Source};
@@ -39,6 +39,8 @@ pub enum Dataset {
     NeAdmin0,
     NeAdmin1,
     NeLakes,
+    /// Natural Earth disputed and claimed boundary lines.
+    NeDisputed,
     Geoboundaries,
 }
 
@@ -52,6 +54,9 @@ pub struct LayerSpec {
     pub name_property: Option<String>,
     /// Property that `region` is compared against (e.g. `CONTINENT`).
     pub filter_property: Option<String>,
+    /// Property with the code of the enclosing unit; borders between
+    /// different parents are drawn thicker.
+    pub parent_property: Option<String>,
     /// Data credit for this layer. Natural Earth presets default to
     /// "Natural Earth"; for geoBoundaries, pass the source and licence.
     pub attribution: Option<String>,
@@ -72,11 +77,13 @@ impl LayerSpec {
                 id_columns: vec!["id".into()],
                 name_column: "name".into(),
                 filter_column: None,
+                parent_column: None,
                 class: "region".into(),
             },
             Dataset::NeAdmin0 => Source::NaturalEarthAdmin0.layer_query(),
             Dataset::NeAdmin1 => Source::NaturalEarthAdmin1.layer_query(),
             Dataset::NeLakes => Source::NaturalEarthLakes.layer_query(),
+            Dataset::NeDisputed => Source::NaturalEarthDisputedLines.layer_query(),
             Dataset::Geoboundaries => Source::GeoBoundaries.layer_query(),
         };
         if let Some(p) = &self.id_property {
@@ -87,6 +94,9 @@ impl LayerSpec {
         }
         if let Some(p) = &self.filter_property {
             q.filter_column = Some(p.clone());
+        }
+        if let Some(p) = &self.parent_property {
+            q.parent_column = Some(p.clone());
         }
         q
     }
@@ -111,7 +121,7 @@ impl LoadedLayer {
         let credit = spec.attribution.clone().or_else(|| {
             matches!(
                 spec.dataset,
-                Dataset::NeAdmin0 | Dataset::NeAdmin1 | Dataset::NeLakes
+                Dataset::NeAdmin0 | Dataset::NeAdmin1 | Dataset::NeLakes | Dataset::NeDisputed
             )
             .then(|| "Natural Earth".to_owned())
         });
@@ -163,6 +173,36 @@ impl LoadedLayer {
     }
 }
 
+/// A parsed line layer (disputed boundaries).
+#[derive(Debug, Clone, Default)]
+pub struct LoadedLines {
+    lines: Vec<MapLine>,
+    credit: Option<String>,
+}
+
+impl LoadedLines {
+    pub fn parse(text: &str, spec: &LayerSpec) -> Result<Self> {
+        let lines = mapgen_data::geojson::lines_from_str(text, &spec.query())?;
+        if lines.is_empty() {
+            return Err(SpecError("the GeoJSON contains no line features".into()));
+        }
+        let natural_earth = spec.dataset == Dataset::NeDisputed;
+        let credit = spec
+            .attribution
+            .clone()
+            .or_else(|| natural_earth.then(|| "Natural Earth".to_owned()));
+        Ok(LoadedLines { lines, credit })
+    }
+
+    pub fn len(&self) -> usize {
+        self.lines.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.lines.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Frame {
@@ -179,6 +219,16 @@ pub enum Projection {
     Auto,
     Laea,
     EqualEarth,
+    Albers,
+    Lcc,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Insets {
+    #[default]
+    Auto,
+    None,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -204,14 +254,30 @@ pub struct RenderSpec {
     pub credit: bool,
     pub theme: Option<String>,
     /// Colour overrides by slot: `background`, `water`, `land` (or `earth`),
-    /// `contextLand`, `border`, `contextBorder`, `lakeBorder`, `label`.
+    /// `contextLand`, `border`, `outline`, `contextBorder`, `lakeBorder`,
+    /// `disputedBorder`, `label`.
     #[serde(default)]
     pub colors: BTreeMap<String, String>,
     pub border_width: Option<f64>,
+    pub parent_border_width: Option<f64>,
+    pub outline_width: Option<f64>,
     pub context_border_width: Option<f64>,
+    pub disputed_border_width: Option<f64>,
     pub label_size: Option<f64>,
     #[serde(default)]
     pub labels: bool,
+    /// Leader lines for small regions' labels (default true).
+    pub leaders: Option<bool>,
+    /// Curved labels along long, thin regions (default true).
+    pub curved_labels: Option<bool>,
+    pub label_min_scale: Option<f64>,
+    /// Snap neighbours within this many pixels onto the outline (default 2).
+    pub snap: Option<f64>,
+    #[serde(default)]
+    pub insets: Insets,
+    pub max_insets: Option<usize>,
+    /// Standard parallels for `albers`/`lcc`.
+    pub parallels: Option<[f64; 2]>,
     #[serde(default)]
     pub css_vars: bool,
     pub simplify: Option<f64>,
@@ -245,6 +311,12 @@ impl RenderSpec {
             positive("borderWidth", self.border_width)?.unwrap_or(theme.border_width);
         theme.context_border_width = positive("contextBorderWidth", self.context_border_width)?
             .unwrap_or(theme.context_border_width);
+        theme.parent_border_width = positive("parentBorderWidth", self.parent_border_width)?
+            .unwrap_or(theme.parent_border_width);
+        theme.outline_width =
+            positive("outlineWidth", self.outline_width)?.unwrap_or(theme.outline_width);
+        theme.disputed_border_width = positive("disputedBorderWidth", self.disputed_border_width)?
+            .unwrap_or(theme.disputed_border_width);
         theme.label_size = positive("labelSize", self.label_size)?.unwrap_or(theme.label_size);
 
         let width = self.width.unwrap_or(d.width);
@@ -269,14 +341,34 @@ impl RenderSpec {
             theme,
             css_vars: self.css_vars || self.format == Format::Html,
             labels: self.labels,
+            label_leaders: self.leaders.unwrap_or(d.label_leaders),
+            label_curved: self.curved_labels.unwrap_or(d.label_curved),
+            label_min_scale: positive("labelMinScale", self.label_min_scale)?
+                .unwrap_or(d.label_min_scale)
+                .min(1.0),
             simplify_px: non_negative("simplify", self.simplify)?.unwrap_or(d.simplify_px),
             min_area_px: non_negative("minArea", self.min_area)?.unwrap_or(d.min_area_px),
-            projection: match self.projection {
-                Projection::Auto => ProjectionChoice::Auto,
-                Projection::Laea => ProjectionChoice::Laea,
-                Projection::EqualEarth => ProjectionChoice::EqualEarth,
+            snap_px: non_negative("snap", self.snap)?.unwrap_or(d.snap_px),
+            projection: {
+                let parallels = match self.parallels {
+                    Some([a, b]) if a.abs() < 90.0 && b.abs() < 90.0 && a != -b => Some((a, b)),
+                    Some(p) => return Err(SpecError(format!("invalid parallels {p:?}"))),
+                    None => None,
+                };
+                match self.projection {
+                    Projection::Auto => ProjectionChoice::Auto,
+                    Projection::Laea => ProjectionChoice::Laea,
+                    Projection::EqualEarth => ProjectionChoice::EqualEarth,
+                    Projection::Albers => ProjectionChoice::Albers { parallels },
+                    Projection::Lcc => ProjectionChoice::Lcc { parallels },
+                }
             },
             frame,
+            insets: match self.insets {
+                Insets::Auto => InsetMode::Auto,
+                Insets::None => InsetMode::None,
+            },
+            max_insets: self.max_insets.unwrap_or(d.max_insets),
             margin: non_negative("margin", self.margin)?.unwrap_or(d.margin),
             center_lon: self.center_lon,
         })
@@ -312,14 +404,21 @@ pub struct MapOutput {
     pub html: Option<String>,
     pub width: u32,
     pub height: u32,
-    /// `"laea"` or `"equal-earth"`.
-    pub projection: &'static str,
+    /// `"laea"`, `"equal-earth"`, `"albers"` or `"lcc"`.
+    pub projection: String,
     /// Projection centre `[lon, lat]` (lat is 0 for Equal Earth).
     pub center: [f64; 2],
-    /// Number of subject regions drawn.
+    /// Number of subject regions drawn (main map and insets).
     pub regions: usize,
-    /// Ids of subject regions left out because they fell outside the frame.
+    /// Ids of subject regions shown nowhere (outside the frame, no inset).
     pub outside_frame: Vec<String>,
+    pub insets: Vec<InsetOutput>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InsetOutput {
+    pub ids: Vec<String>,
+    pub projection: String,
 }
 
 /// The layers a render draws from.
@@ -328,20 +427,22 @@ pub struct Sources<'a> {
     pub subject: &'a LoadedLayer,
     pub context: Option<&'a LoadedLayer>,
     pub lakes: Option<&'a LoadedLayer>,
+    pub disputed: Option<&'a LoadedLines>,
 }
 
 impl Sources<'_> {
     /// Distinct layer credits, in subject/context/lakes order.
     fn credits(&self) -> Option<String> {
         let mut out: Vec<&str> = Vec::new();
-        for layer in [Some(self.subject), self.context, self.lakes]
+        let layers = [Some(self.subject), self.context, self.lakes]
             .into_iter()
-            .flatten()
-        {
-            if let Some(c) = layer.credit.as_deref() {
-                if !out.contains(&c) {
-                    out.push(c);
-                }
+            .flatten();
+        let credits = layers.map(|l| l.credit.as_deref()).chain(std::iter::once(
+            self.disputed.and_then(|d| d.credit.as_deref()),
+        ));
+        for c in credits.flatten() {
+            if !out.contains(&c) {
+                out.push(c);
             }
         }
         (!out.is_empty()).then(|| out.join("; "))
@@ -358,13 +459,12 @@ pub fn render_map(src: Sources, spec: &RenderSpec) -> Result<MapOutput> {
         subject: src.subject.select(region)?,
         context: src.context.map(LoadedLayer::all).unwrap_or_default(),
         lakes: src.lakes.map(LoadedLayer::all).unwrap_or_default(),
+        disputed: src.disputed.map(|d| d.lines.clone()).unwrap_or_default(),
     };
     layers.exclude_subject_from_context(region);
     let rendered = render(&layers, &opts)?;
-    let (projection, center) = match rendered.projection {
-        MapProjection::Laea(p) => ("laea", [p.lon0, p.lat0]),
-        MapProjection::EqualEarth(p) => ("equal-earth", [p.lon0, 0.0]),
-    };
+    let projection = rendered.projection.name();
+    let center = rendered.projection.center();
     let html = (spec.format == Format::Html).then(|| {
         let title = spec.title.as_deref().unwrap_or("map");
         mapgen_core::html_page(&rendered.svg, title, &opts.theme, "map.svg")
@@ -378,6 +478,14 @@ pub fn render_map(src: Sources, spec: &RenderSpec) -> Result<MapOutput> {
         projection,
         center,
         outside_frame: rendered.outside_frame,
+        insets: rendered
+            .insets
+            .into_iter()
+            .map(|i| InsetOutput {
+                ids: i.ids,
+                projection: i.projection,
+            })
+            .collect(),
     })
 }
 
@@ -427,6 +535,7 @@ mod tests {
                 subject: &layer,
                 context: None,
                 lakes: None,
+                disputed: None,
             },
             s,
         )
@@ -498,6 +607,7 @@ mod tests {
             subject: &layer,
             context: None,
             lakes: None,
+            disputed: None,
         };
         let out = render_map(src, &spec(r#"{"region": "Westland"}"#).unwrap()).unwrap();
         assert_eq!(out.regions, 1);
@@ -550,6 +660,7 @@ mod tests {
             subject: &subject,
             context: Some(&context),
             lakes: Some(&context),
+            disputed: None,
         };
         let out = render_map(src, &RenderSpec::default()).unwrap();
         assert!(out

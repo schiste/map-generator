@@ -15,15 +15,15 @@
 mod spec;
 
 pub use spec::{
-    bbox_table, render_map, theme_table, Dataset, LayerSpec, LoadedLayer, MapOutput, RenderSpec,
-    Sources, SpecError,
+    bbox_table, render_map, theme_table, Dataset, LayerSpec, LoadedLayer, LoadedLines, MapOutput,
+    RenderSpec, Sources, SpecError,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 #[wasm_bindgen(typescript_custom_section)]
 const TYPES: &str = r##"
-export type Dataset = "custom" | "ne-admin0" | "ne-admin1" | "ne-lakes" | "geoboundaries";
+export type Dataset = "custom" | "ne-admin0" | "ne-admin1" | "ne-lakes" | "ne-disputed" | "geoboundaries";
 
 /** How to read a GeoJSON layer. */
 export interface LayerSpec {
@@ -33,13 +33,15 @@ export interface LayerSpec {
   nameProperty?: string;
   /** Property that `region` is compared against, e.g. "CONTINENT". */
   filterProperty?: string;
+  /** Property with the enclosing unit's code; borders between different parents are drawn thicker. */
+  parentProperty?: string;
   /** Data credit for this layer (Natural Earth presets default to "Natural Earth"). */
   attribution?: string;
 }
 
 export type ColorSlot =
   | "background" | "water" | "land" | "earth" | "contextLand"
-  | "border" | "contextBorder" | "lakeBorder" | "label";
+  | "border" | "outline" | "contextBorder" | "lakeBorder" | "disputedBorder" | "label";
 
 /** Options for one render. Mirrors the CLI flags; everything is optional. */
 export interface RenderSpec {
@@ -56,9 +58,27 @@ export interface RenderSpec {
   /** Any CSS colour, e.g. { water: "#c6ecff", earth: "tan", background: "none" }. */
   colors?: Partial<Record<ColorSlot, string>>;
   borderWidth?: number;
+  /** Borders between regions with different parents. */
+  parentBorderWidth?: number;
+  /** Outer edge of the mapped area. */
+  outlineWidth?: number;
   contextBorderWidth?: number;
+  disputedBorderWidth?: number;
   labelSize?: number;
   labels?: boolean;
+  /** Label small regions outside them with a leader line (default true). */
+  leaders?: boolean;
+  /** Curve labels along long, thin regions (default true). */
+  curvedLabels?: boolean;
+  /** Smallest label size as a fraction of labelSize (default 0.7). */
+  labelMinScale?: number;
+  /** Snap neighbours within this many pixels onto the mapped area's outline (default 2). */
+  snap?: number;
+  /** "auto": far-away parts (overseas territories…) in corner boxes. */
+  insets?: "auto" | "none";
+  maxInsets?: number;
+  /** Standard parallels for albers/lcc. */
+  parallels?: [number, number];
   /** Emit colours as `var(--mg-<slot>, …)` for restyling from page CSS. */
   cssVars?: boolean;
   /** Simplification tolerance in pixels (0 disables). */
@@ -69,7 +89,7 @@ export interface RenderSpec {
   frame?: "auto" | "all" | "world";
   /** "west,south,east,north" or a preset name from `bboxPresets()`. */
   bbox?: string;
-  projection?: "auto" | "laea" | "equal-earth";
+  projection?: "auto" | "laea" | "equal-earth" | "albers" | "lcc";
   centerLon?: number;
   /** "html" also returns an interactive page with colour pickers. */
   format?: "svg" | "html";
@@ -86,6 +106,8 @@ export interface MapGenerator {
   setContext(geojson?: string, spec?: LayerSpec): number;
   /** Loads lakes (default: Natural Earth lakes); omit `geojson` to remove them. */
   setLakes(geojson?: string, spec?: LayerSpec): number;
+  /** Loads disputed boundary lines, drawn dashed (default: Natural Earth); omit to remove. */
+  setDisputed(geojson?: string, spec?: LayerSpec): number;
   /** Renders a map. */
   render(spec?: RenderSpec): MapOutput;
 }
@@ -95,13 +117,15 @@ export interface MapOutput {
   html?: string;
   width: number;
   height: number;
-  projection: "laea" | "equal-earth";
+  projection: "laea" | "equal-earth" | "albers" | "lcc";
   /** Projection centre [lon, lat]. */
   center: [number, number];
-  /** Number of subject regions drawn. */
+  /** Number of subject regions drawn (main map and insets). */
   regions: number;
-  /** Ids of regions left out because they fell outside the frame. */
+  /** Ids of regions shown nowhere (outside the frame and not in an inset). */
   outsideFrame: string[];
+  /** Inset boxes: the regions in each and its projection. */
+  insets: { ids: string[]; projection: string }[];
 }
 "##;
 
@@ -164,6 +188,7 @@ pub struct MapGenerator {
     subject: Option<LoadedLayer>,
     context: Option<LoadedLayer>,
     lakes: Option<LoadedLayer>,
+    disputed: Option<LoadedLines>,
 }
 
 #[wasm_bindgen]
@@ -209,6 +234,27 @@ impl MapGenerator {
         Ok(self.lakes.as_ref().map_or(0, LoadedLayer::len))
     }
 
+    /// Loads disputed boundary lines (default preset: Natural Earth). Pass
+    /// `undefined` to remove them.
+    #[wasm_bindgen(js_name = setDisputed, skip_typescript)]
+    pub fn set_disputed(
+        &mut self,
+        geojson: Option<String>,
+        spec: Option<LayerSpecJs>,
+    ) -> Result<usize, JsError> {
+        self.disputed = match geojson {
+            None => None,
+            Some(text) => {
+                let spec = match spec {
+                    None => LayerSpec::with_dataset(Dataset::NeDisputed),
+                    Some(s) => from_js(Some(s))?,
+                };
+                Some(LoadedLines::parse(&text, &spec).map_err(js_err)?)
+            }
+        };
+        Ok(self.disputed.as_ref().map_or(0, LoadedLines::len))
+    }
+
     /// Distinct region codes in the subject layer, sorted.
     pub fn regions(&self) -> Result<Vec<String>, JsError> {
         Ok(self.subject()?.regions())
@@ -222,6 +268,7 @@ impl MapGenerator {
             subject: self.subject()?,
             context: self.context.as_ref(),
             lakes: self.lakes.as_ref(),
+            disputed: self.disputed.as_ref(),
         };
         Ok(to_js(&render_map(src, &spec).map_err(js_err)?)?.unchecked_into())
     }

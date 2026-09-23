@@ -10,7 +10,9 @@ authors.workspace = true
 
 [dependencies]
 mapgen-core.workspace = true
+geo.workspace = true
 geo-types.workspace = true
+rstar = "0.12"
 thiserror.workspace = true
 rusqlite = { version = "0.37", features = ["bundled"], optional = true }
 geozero = { version = "0.14", default-features = false, features = ["with-wkb", "with-geo"], optional = true }

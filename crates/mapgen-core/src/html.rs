@@ -5,14 +5,16 @@ use std::fmt::Write;
 use crate::svg::escape;
 use crate::theme::{Theme, COLOR_SLOTS};
 
-const LABELS: [&str; 8] = [
+const LABELS: [&str; 10] = [
     "Background",
     "Water",
     "Land",
     "Neighbours",
     "Borders",
+    "Outline",
     "Neighbour borders",
     "Lake shores",
+    "Disputed borders",
     "Labels",
 ];
 

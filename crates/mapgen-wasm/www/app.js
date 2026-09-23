@@ -8,9 +8,11 @@ const SAMPLES = {
 };
 const CONTEXT = NE + "ne_10m_admin_0_countries.geojson";
 const LAKES = NE + "ne_10m_lakes.geojson";
+const DISPUTED = NE + "ne_10m_admin_0_boundary_lines_disputed_areas.geojson";
 const LABELS = {
   background: "Background", water: "Water", land: "Land", "context-land": "Neighbours",
-  border: "Borders", "context-border": "Neighbour borders", "lake-border": "Lake shores", label: "Labels",
+  border: "Borders", outline: "Outline", "context-border": "Neighbour borders",
+  "lake-border": "Lake shores", "disputed-border": "Disputed", label: "Labels",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -42,10 +44,14 @@ $("load-sample").addEventListener("click", () =>
     const dataset = $("sample").value;
     const subject = await fetchText(SAMPLES[dataset], "sample data");
     const withContext = $("with-context").checked;
-    const [context, lakes] = withContext
-      ? await Promise.all([fetchText(CONTEXT, "neighbours"), fetchText(LAKES, "lakes")])
-      : [undefined, undefined];
-    loadGenerator(subject, { dataset }, context, lakes, dataset === "ne-admin1" ? "FRA" : "");
+    const [context, lakes, disputed] = withContext
+      ? await Promise.all([
+          fetchText(CONTEXT, "neighbours"),
+          fetchText(LAKES, "lakes"),
+          fetchText(DISPUTED, "disputed boundaries"),
+        ])
+      : [undefined, undefined, undefined];
+    loadGenerator(subject, { dataset }, context, lakes, dataset === "ne-admin1" ? "FRA" : "", disputed);
   }),
 );
 
@@ -60,12 +66,13 @@ $("file").addEventListener("change", () =>
   }),
 );
 
-function loadGenerator(subject, spec, context, lakes, preferredRegion) {
+function loadGenerator(subject, spec, context, lakes, preferredRegion, disputed) {
   const t = performance.now();
   const g = new MapGenerator();
   const n = g.setSubject(subject, spec);
   if (context) g.setContext(context);
   if (lakes) g.setLakes(lakes);
+  if (disputed) g.setDisputed(disputed);
   gen.current?.free();
   gen.current = g;
 
@@ -109,6 +116,7 @@ function render() {
       $("download").disabled = false;
       const kb = (new Blob([out.svg]).size / 1024).toFixed(0);
       let info = `${out.regions} regions · ${out.width}×${out.height} px · ${kb} KB · ${out.projection} · ${ms} ms`;
+      if (out.insets.length) info += ` · ${out.insets.length} inset(s)`;
       if (out.outsideFrame.length) info += ` · ${out.outsideFrame.length} outside the frame`;
       $("info").textContent = info;
     }),

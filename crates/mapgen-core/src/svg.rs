@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 use std::fmt::Write;
 
-use geo::{Area, BoundingRect, InteriorPoint};
 use geo_types::{LineString, MultiPolygon};
 
 use crate::feature::MapFeature;
+use crate::labels::{Label, LabelShape};
+use crate::panel::{BorderKind, Panel};
 use crate::theme::Theme;
 
 /// Affine transform from projected metres to SVG pixels (y axis flipped).
@@ -13,33 +14,31 @@ pub struct Viewport {
     pub min_x: f64,
     pub max_y: f64,
     pub scale: f64,
-    pub padding: f64,
-    pub width: u32,
-    pub height: u32,
+    /// Pixel position of the frame's top-left corner.
+    pub left: f64,
+    pub top: f64,
+    /// Height of the whole canvas (main panel only).
+    pub canvas_height: f64,
 }
 
 impl Viewport {
     pub fn to_px(self, x: f64, y: f64) -> (f64, f64) {
         (
-            self.padding + (x - self.min_x) * self.scale,
-            self.padding + (self.max_y - y) * self.scale,
+            self.left + (x - self.min_x) * self.scale,
+            self.top + (self.max_y - y) * self.scale,
         )
     }
 }
 
-/// Everything the writer needs; all geometries are already projected.
+/// Everything the writer needs: the canvas and its panels (main map first,
+/// then insets), all geometry already projected.
 #[derive(Debug, Clone, Copy)]
 pub struct SvgDocument<'a> {
-    pub viewport: Viewport,
-    /// Sea: the frame rectangle, or the globe outline on world maps.
-    pub water: &'a MultiPolygon<f64>,
-    pub context: &'a [MapFeature],
-    pub subject: &'a [MapFeature],
-    pub lakes: &'a [MapFeature],
-    pub labels: bool,
+    pub width: u32,
+    pub height: u32,
+    pub panels: &'a [Panel],
     pub theme: &'a Theme,
     pub title: Option<&'a str>,
-    /// Data credit, embedded as `<desc>` (and drawn if `credit` is set).
     pub attribution: Option<&'a str>,
     /// Draw the attribution in the bottom-right corner.
     pub credit: bool,
@@ -52,12 +51,13 @@ pub struct SvgDocument<'a> {
 
 /// Serialises a map into an SVG document.
 ///
-/// Layers, bottom to top: `#background`, `#water`, `#context`, `#land`,
-/// `#lakes`, `#labels`. Colours live in the `<style>` block only.
+/// Main-map layers, bottom to top: `#background`, `#water`, `#context`,
+/// `#context-borders`, `#land`, `#lakes`, `#borders`, `#labels`; then one
+/// `g.mg-inset` per inset with the same layers (as classes). Colours live in
+/// the `<style>` block only; region fills have no stroke, and every border is
+/// drawn once, in `#borders`, by kind.
 pub fn write_svg(doc: &SvgDocument) -> String {
-    let vp = doc.viewport;
-    let p = doc.precision;
-    let (w, h) = (vp.width, vp.height);
+    let (w, h) = (doc.width, doc.height);
     let mut out = String::new();
     let mut ids = HashSet::new();
 
@@ -85,35 +85,8 @@ pub fn write_svg(doc: &SvgDocument) -> String {
         out,
         "<rect id=\"background\" class=\"mg-background\" width=\"{w}\" height=\"{h}\"/>"
     );
-    let water = path_data(doc.water, vp, p);
-    if !water.is_empty() {
-        let _ = writeln!(out, "<path id=\"water\" class=\"mg-water\" d=\"{water}\"/>");
-    }
-    write_layer(
-        &mut out,
-        &mut ids,
-        "context",
-        "mg-context",
-        "",
-        doc.context,
-        vp,
-        p,
-    );
-    write_layer(
-        &mut out,
-        &mut ids,
-        "land",
-        "mg-land",
-        "",
-        doc.subject,
-        vp,
-        p,
-    );
-    write_layer(
-        &mut out, &mut ids, "lakes", "mg-lake", "lake-", doc.lakes, vp, p,
-    );
-    if doc.labels {
-        write_labels(&mut out, doc.subject, vp, doc.theme.label_size);
+    for (i, panel) in doc.panels.iter().enumerate() {
+        write_panel(&mut out, &mut ids, panel, i, doc);
     }
     if let (true, Some(attribution)) = (doc.credit, doc.attribution) {
         let _ = writeln!(
@@ -126,6 +99,101 @@ pub fn write_svg(doc: &SvgDocument) -> String {
     }
     out.push_str("</svg>\n");
     out
+}
+
+fn write_panel(
+    out: &mut String,
+    ids: &mut HashSet<String>,
+    panel: &Panel,
+    index: usize,
+    doc: &SvgDocument,
+) {
+    let vp = panel.viewport;
+    let p = doc.precision;
+    // The main map's layers have ids; insets use classes (ids must be unique).
+    let main = index == 0;
+    let group = |name: &str| {
+        if main {
+            format!("id=\"{name}\"")
+        } else {
+            format!("class=\"mg-{name}\"")
+        }
+    };
+    if !main {
+        let _ = writeln!(out, "<g id=\"inset-{index}\" class=\"mg-inset\">");
+    }
+    let water = path_data(&panel.water, vp, p);
+    if !water.is_empty() {
+        let id = if main { "id=\"water\" " } else { "" };
+        let _ = writeln!(out, "<path {id}class=\"mg-water\" d=\"{water}\"/>");
+    }
+    write_layer(
+        out,
+        ids,
+        &group("context"),
+        "mg-context",
+        "",
+        &panel.context,
+        vp,
+        p,
+    );
+    write_borders(
+        out,
+        &group("context-borders"),
+        panel,
+        |k| k == BorderKind::Context,
+        vp,
+        p,
+    );
+    write_layer(
+        out,
+        ids,
+        &group("land"),
+        "mg-land",
+        "",
+        &panel.subject,
+        vp,
+        p,
+    );
+    write_layer(
+        out,
+        ids,
+        &group("lakes"),
+        "mg-lake",
+        "lake-",
+        &panel.lakes,
+        vp,
+        p,
+    );
+    write_borders(
+        out,
+        &group("borders"),
+        panel,
+        |k| k != BorderKind::Context,
+        vp,
+        p,
+    );
+    write_labels(
+        out,
+        ids,
+        &group("labels"),
+        &panel.labels,
+        &panel.subject,
+        doc.theme.label_size,
+    );
+    if let Some(b) = panel.inset_box {
+        let _ = writeln!(
+            out,
+            "<rect class=\"mg-inset-frame\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/>",
+            fmt_num(b.min().x, 1),
+            fmt_num(b.min().y, 1),
+            fmt_num(b.width(), 1),
+            fmt_num(b.height(), 1)
+        );
+    }
+    if !main {
+        out.push_str("</g>\n");
+    }
 }
 
 /// The `<style>` contents: every colour of the map is defined here.
@@ -143,18 +211,24 @@ pub fn stylesheet(theme: &Theme, css_vars: bool) -> String {
             value
         }
     };
-    let bw = fmt_num(theme.border_width, 3);
-    let cbw = fmt_num(theme.context_border_width, 3);
-    let ls = fmt_num(theme.label_size, 2);
+    let n = |v: f64| fmt_num(v, 3);
     format!(
-        "path{{stroke-linejoin:round;fill-rule:evenodd}}\n\
+        "path{{fill-rule:evenodd}}\n\
          .mg-background{{fill:{bg}}}\n\
          .mg-water{{fill:{water}}}\n\
-         .mg-context{{fill:{ctx};stroke:{ctxb};stroke-width:{cbw}}}\n\
-         .mg-land{{fill:{land};stroke:{border};stroke-width:{bw}}}\n\
+         .mg-context{{fill:{ctx}}}\n\
+         .mg-land{{fill:{land}}}\n\
          .mg-lake{{fill:{water};stroke:{lakeb};stroke-width:{cbw}}}\n\
+         .mg-border{{fill:none;stroke-linejoin:round;stroke-linecap:round}}\n\
+         .mg-border-context{{stroke:{ctxb};stroke-width:{cbw}}}\n\
+         .mg-border-internal{{stroke:{border};stroke-width:{bw}}}\n\
+         .mg-border-parent{{stroke:{border};stroke-width:{pbw}}}\n\
+         .mg-border-outline{{stroke:{outline};stroke-width:{ow}}}\n\
+         .mg-border-disputed{{stroke:{disputed};stroke-width:{dw};stroke-dasharray:{dash1} {dash2}}}\n\
          .mg-label{{fill:{label};font:{ls}px sans-serif;text-anchor:middle;dominant-baseline:central;\
          paint-order:stroke;stroke:{land};stroke-width:2.5px;stroke-linejoin:round}}\n\
+         .mg-leader{{fill:none;stroke:{label};stroke-width:0.6}}\n\
+         .mg-inset-frame{{fill:none;stroke:{outline};stroke-width:1}}\n\
          .mg-credit{{fill:{label};font:9px sans-serif;text-anchor:end;opacity:.75}}\n",
         bg = c("background"),
         water = c("water"),
@@ -162,8 +236,18 @@ pub fn stylesheet(theme: &Theme, css_vars: bool) -> String {
         ctxb = c("context-border"),
         land = c("land"),
         border = c("border"),
+        outline = c("outline"),
         lakeb = c("lake-border"),
+        disputed = c("disputed-border"),
         label = c("label"),
+        bw = n(theme.border_width),
+        pbw = n(theme.parent_border_width),
+        ow = n(theme.outline_width),
+        cbw = n(theme.context_border_width),
+        dw = n(theme.disputed_border_width),
+        dash1 = n(4.0 * theme.disputed_border_width),
+        dash2 = n(2.5 * theme.disputed_border_width),
+        ls = fmt_num(theme.label_size, 2),
     )
 }
 
@@ -186,7 +270,7 @@ fn write_layer(
     if paths.is_empty() {
         return;
     }
-    let _ = writeln!(out, "<g id=\"{group}\">");
+    let _ = writeln!(out, "<g {group}>");
     for (f, d) in paths {
         let id = unique_id(ids, &format!("{id_prefix}{}", f.id));
         let _ = writeln!(
@@ -201,54 +285,108 @@ fn write_layer(
     out.push_str("</g>\n");
 }
 
-fn write_labels(out: &mut String, features: &[MapFeature], vp: Viewport, size: f64) {
-    // Candidates: (area, feature index, x, y, half width, half height) in px.
-    let mut candidates = Vec::new();
-    for (i, f) in features.iter().enumerate() {
-        let Some(poly) = f
-            .geometry
-            .0
-            .iter()
-            .max_by(|a, b| a.unsigned_area().total_cmp(&b.unsigned_area()))
-        else {
-            continue;
-        };
-        let (Some(pt), Some(bb)) = (poly.interior_point(), poly.bounding_rect()) else {
-            continue;
-        };
-        let (hw, hh) = (0.3 * size * f.name.chars().count() as f64, 0.6 * size);
-        // Skip labels that clearly don't fit their region.
-        if bb.width() * vp.scale < 2.0 * hw || bb.height() * vp.scale < 2.0 * hh {
-            continue;
-        }
-        let (x, y) = vp.to_px(pt.x(), pt.y());
-        candidates.push((poly.unsigned_area(), i, x, y, hw, hh));
-    }
-    // Largest regions claim space first; a label overlapping one already
-    // placed is dropped.
-    candidates.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
-    let mut placed: Vec<(usize, f64, f64, f64, f64)> = Vec::new();
-    for &(_, i, x, y, hw, hh) in &candidates {
-        let clear = placed
-            .iter()
-            .all(|&(_, px, py, phw, phh)| (x - px).abs() >= hw + phw || (y - py).abs() >= hh + phh);
-        if clear {
-            placed.push((i, x, y, hw, hh));
-        }
-    }
-    if placed.is_empty() {
+/// One `<path>` per border kind, each border segment drawn once.
+fn write_borders(
+    out: &mut String,
+    group: &str,
+    panel: &Panel,
+    select: impl Fn(BorderKind) -> bool,
+    vp: Viewport,
+    precision: usize,
+) {
+    let paths: Vec<(BorderKind, String)> = panel
+        .borders
+        .iter()
+        .filter(|(k, _)| select(*k))
+        .map(|(k, lines)| {
+            let mut d = String::new();
+            for l in lines {
+                line_data(&mut d, l, vp, precision);
+            }
+            (*k, d)
+        })
+        .filter(|(_, d)| !d.is_empty())
+        .collect();
+    if paths.is_empty() {
         return;
     }
-    placed.sort_by_key(|p| p.0);
-    out.push_str("<g id=\"labels\">\n");
-    for (i, x, y, _, _) in placed {
-        let _ = writeln!(
-            out,
-            "<text class=\"mg-label\" x=\"{}\" y=\"{}\">{}</text>",
-            fmt_num(x, 1),
-            fmt_num(y, 1),
-            escape(&features[i].name)
-        );
+    let _ = writeln!(out, "<g {group}>");
+    for (k, d) in paths {
+        let _ = writeln!(out, "<path class=\"mg-border {}\" d=\"{d}\"/>", k.class());
+    }
+    out.push_str("</g>\n");
+}
+
+fn write_labels(
+    out: &mut String,
+    ids: &mut HashSet<String>,
+    group: &str,
+    labels: &[Label],
+    subject: &[MapFeature],
+    nominal: f64,
+) {
+    if labels.is_empty() {
+        return;
+    }
+    let _ = writeln!(out, "<g {group}>");
+    for l in labels {
+        // The stylesheet sets the nominal size; shrunk labels override it.
+        let style = if (l.size - nominal).abs() > 1e-9 {
+            format!(" style=\"font-size:{}px\"", fmt_num(l.size, 2))
+        } else {
+            String::new()
+        };
+        let text = escape(&l.text);
+        match &l.shape {
+            LabelShape::Straight => {
+                let _ = writeln!(
+                    out,
+                    "<text class=\"mg-label\" x=\"{}\" y=\"{}\"{style}>{text}</text>",
+                    fmt_num(l.x, 1),
+                    fmt_num(l.y, 1)
+                );
+            }
+            LabelShape::Leader { anchor, end } => {
+                let _ = writeln!(
+                    out,
+                    "<path class=\"mg-leader\" d=\"M{} {}L{} {}\"/>",
+                    fmt_num(anchor.0, 1),
+                    fmt_num(anchor.1, 1),
+                    fmt_num(end.0, 1),
+                    fmt_num(end.1, 1)
+                );
+                let _ = writeln!(
+                    out,
+                    "<text class=\"mg-label\" x=\"{}\" y=\"{}\"{style}>{text}</text>",
+                    fmt_num(l.x, 1),
+                    fmt_num(l.y, 1)
+                );
+            }
+            LabelShape::Curved { path } => {
+                let base = subject.get(l.feature).map_or("label", |f| f.id.as_str());
+                let id = unique_id(ids, &format!("label-path-{base}"));
+                let mut d = String::new();
+                for (i, (x, y)) in path.iter().enumerate() {
+                    let _ = write!(
+                        d,
+                        "{}{} {}",
+                        if i == 0 { "M" } else { "L" },
+                        fmt_num(*x, 1),
+                        fmt_num(*y, 1)
+                    );
+                }
+                let _ = writeln!(
+                    out,
+                    "<path id=\"{}\" fill=\"none\" d=\"{d}\"/>",
+                    escape(&id)
+                );
+                let _ = writeln!(
+                    out,
+                    "<text class=\"mg-label\"{style}><textPath href=\"#{}\" startOffset=\"50%\">{text}</textPath></text>",
+                    escape(&id)
+                );
+            }
+        }
     }
     out.push_str("</g>\n");
 }
@@ -309,6 +447,23 @@ fn ring_data(d: &mut String, ring: &LineString<f64>, vp: Viewport, precision: us
         let _ = write!(d, "{}{x} {y}", if i == 0 { "M" } else { "L" });
     }
     d.push('Z');
+}
+
+fn line_data(d: &mut String, line: &LineString<f64>, vp: Viewport, precision: usize) {
+    let mut pts: Vec<(String, String)> = Vec::with_capacity(line.0.len());
+    for c in line.0.iter() {
+        let (x, y) = vp.to_px(c.x, c.y);
+        let p = (fmt_num(x, precision), fmt_num(y, precision));
+        if pts.last() != Some(&p) {
+            pts.push(p);
+        }
+    }
+    if pts.len() < 2 {
+        return;
+    }
+    for (i, (x, y)) in pts.iter().enumerate() {
+        let _ = write!(d, "{}{x} {y}", if i == 0 { "M" } else { "L" });
+    }
 }
 
 /// Fixed-precision number formatting with trailing zeros and `-0` removed,

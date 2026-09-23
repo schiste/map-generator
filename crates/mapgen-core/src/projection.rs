@@ -1,5 +1,5 @@
 use crate::antimeridian::wrap_longitude;
-use crate::math::{asin, cos, sin};
+use crate::math::{asin, cos, ln, pow, sin, tan};
 
 /// Authalic (equal-area) radius of the WGS84 ellipsoid, in metres.
 pub const AUTHALIC_RADIUS_M: f64 = 6_371_007.181;
@@ -9,14 +9,27 @@ pub trait Projection {
     fn project(&self, lon: f64, lat: f64) -> (f64, f64);
 }
 
-/// Which projection to use; `Auto` picks LAEA for regions and Equal Earth for
-/// world maps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Which projection to use.
+///
+/// `Auto` picks Equal Earth for world maps, Albers equal-area conic for
+/// regions that are wide in mid-latitudes (the US, Canada, Russia, China...),
+/// and Lambert azimuthal equal-area otherwise.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ProjectionChoice {
     #[default]
     Auto,
     Laea,
     EqualEarth,
+    /// Albers equal-area conic; standard parallels from the region unless given.
+    Albers {
+        parallels: Option<(f64, f64)>,
+    },
+    /// Lambert conformal conic; standard parallels from the region unless given.
+    Lcc {
+        parallels: Option<(f64, f64)>,
+    },
+    /// Any EPSG coordinate reference system, through PROJ (`proj` feature).
+    Epsg(u32),
 }
 
 /// Spherical Lambert Azimuthal Equal-Area projection.
@@ -41,6 +54,67 @@ impl Projection for LambertAzimuthalEqualArea {
         let x = AUTHALIC_RADIUS_M * k * cos(phi) * sin(dlon);
         let y = AUTHALIC_RADIUS_M * k * (cos(phi0) * sin(phi) - sin(phi0) * cos(phi) * cos(dlon));
         (x, y)
+    }
+}
+
+/// Spherical Albers equal-area conic.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Albers {
+    pub lon0: f64,
+    pub lat0: f64,
+    pub parallels: (f64, f64),
+}
+
+impl Projection for Albers {
+    fn project(&self, lon: f64, lat: f64) -> (f64, f64) {
+        let (p1, p2) = (self.parallels.0.to_radians(), self.parallels.1.to_radians());
+        let n = (sin(p1) + sin(p2)) / 2.0;
+        let c = cos(p1) * cos(p1) + 2.0 * n * sin(p1);
+        let rho = |phi: f64| AUTHALIC_RADIUS_M * (c - 2.0 * n * sin(phi)).max(0.0).sqrt() / n;
+        let theta = n * wrap_longitude(lon - self.lon0).to_radians();
+        let (r, r0) = (rho(lat.to_radians()), rho(self.lat0.to_radians()));
+        (r * sin(theta), r0 - r * cos(theta))
+    }
+}
+
+/// Spherical Lambert conformal conic.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LambertConformalConic {
+    pub lon0: f64,
+    pub lat0: f64,
+    pub parallels: (f64, f64),
+}
+
+impl Projection for LambertConformalConic {
+    fn project(&self, lon: f64, lat: f64) -> (f64, f64) {
+        use std::f64::consts::FRAC_PI_4;
+        let (p1, p2) = (self.parallels.0.to_radians(), self.parallels.1.to_radians());
+        let t = |phi: f64| tan(FRAC_PI_4 + phi / 2.0);
+        let n = if (p1 - p2).abs() < 1e-10 {
+            sin(p1)
+        } else {
+            ln(cos(p1) / cos(p2)) / ln(t(p2) / t(p1))
+        };
+        let f = cos(p1) * pow(t(p1), n) / n;
+        // The pole away from the cone's apex is at infinity; stop just short.
+        let clamp = |phi: f64| phi.clamp(-89.5_f64.to_radians(), 89.5_f64.to_radians());
+        let rho = |phi: f64| AUTHALIC_RADIUS_M * f / pow(t(clamp(phi)), n);
+        let theta = n * wrap_longitude(lon - self.lon0).to_radians();
+        let (r, r0) = (rho(lat.to_radians()), rho(self.lat0.to_radians()));
+        (r * sin(theta), r0 - r * cos(theta))
+    }
+}
+
+/// Standard parallels by the one-sixth rule: 1/6 of the latitude range in
+/// from each edge. Degenerate cases (straddling the equator symmetrically)
+/// are nudged so the cone constant stays away from zero.
+pub fn one_sixth_parallels(south: f64, north: f64) -> (f64, f64) {
+    let d = (north - south) / 6.0;
+    let (a, b) = (south + d, north - d);
+    if (a + b).abs() < 1.0 {
+        (a.max(1.0), b.max(a.max(1.0) + 1.0))
+    } else {
+        (a, b)
     }
 }
 
@@ -80,13 +154,20 @@ impl Projection for EqualEarth {
 }
 
 /// The projection actually used for a map.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum MapProjection {
     Laea(LambertAzimuthalEqualArea),
     EqualEarth(EqualEarth),
+    Albers(Albers),
+    Lcc(LambertConformalConic),
+    #[cfg(feature = "proj")]
+    Epsg(crate::epsg::EpsgProjection),
 }
 
 impl MapProjection {
+    /// True when the projection has a seam at `lon0 ± 180°` that geometries
+    /// must be cut along (only Equal Earth among the built-in projections;
+    /// regional projections never reach their seam).
     pub fn has_seam(&self) -> bool {
         matches!(self, MapProjection::EqualEarth(_))
     }
@@ -95,6 +176,34 @@ impl MapProjection {
         match self {
             MapProjection::Laea(p) => p.lon0,
             MapProjection::EqualEarth(p) => p.lon0,
+            MapProjection::Albers(p) => p.lon0,
+            MapProjection::Lcc(p) => p.lon0,
+            #[cfg(feature = "proj")]
+            MapProjection::Epsg(p) => p.lon0,
+        }
+    }
+
+    /// Short name: `laea`, `equal-earth`, `albers`, `lcc` or `epsg:<code>`.
+    pub fn name(&self) -> String {
+        match self {
+            MapProjection::Laea(_) => "laea".into(),
+            MapProjection::EqualEarth(_) => "equal-earth".into(),
+            MapProjection::Albers(_) => "albers".into(),
+            MapProjection::Lcc(_) => "lcc".into(),
+            #[cfg(feature = "proj")]
+            MapProjection::Epsg(p) => format!("epsg:{}", p.code),
+        }
+    }
+
+    /// Projection centre `[lon, lat]`.
+    pub fn center(&self) -> [f64; 2] {
+        match self {
+            MapProjection::Laea(p) => [p.lon0, p.lat0],
+            MapProjection::EqualEarth(p) => [p.lon0, 0.0],
+            MapProjection::Albers(p) => [p.lon0, p.lat0],
+            MapProjection::Lcc(p) => [p.lon0, p.lat0],
+            #[cfg(feature = "proj")]
+            MapProjection::Epsg(p) => [p.lon0, 0.0],
         }
     }
 }
@@ -104,6 +213,10 @@ impl Projection for MapProjection {
         match self {
             MapProjection::Laea(p) => p.project(lon, lat),
             MapProjection::EqualEarth(p) => p.project(lon, lat),
+            MapProjection::Albers(p) => p.project(lon, lat),
+            MapProjection::Lcc(p) => p.project(lon, lat),
+            #[cfg(feature = "proj")]
+            MapProjection::Epsg(p) => p.project(lon, lat),
         }
     }
 }
@@ -142,6 +255,63 @@ mod tests {
         let (xb, _) = p.project(-179.9, -17.0);
         // 0.2° of longitude apart, so ~20 km, not ~40 000 km.
         assert!((xb - xa).abs() < 30_000.0);
+    }
+
+    #[test]
+    fn conics_are_centred_and_oriented() {
+        let par = one_sixth_parallels(25.0, 49.0);
+        assert_eq!(par, (29.0, 45.0));
+        let a = Albers {
+            lon0: -96.0,
+            lat0: 37.0,
+            parallels: par,
+        };
+        let l = LambertConformalConic {
+            lon0: -96.0,
+            lat0: 37.0,
+            parallels: par,
+        };
+        for p in [&a as &dyn Projection, &l] {
+            let (x, y) = p.project(-96.0, 37.0);
+            assert!(x.abs() < 1e-6 && y.abs() < 1e-6);
+            assert!(p.project(-90.0, 37.0).0 > 0.0, "east is +x");
+            assert!(p.project(-96.0, 40.0).1 > 0.0, "north is +y");
+        }
+    }
+
+    #[test]
+    fn albers_preserves_area() {
+        // Two 1°×1° cells at the same latitude but different longitudes, and a
+        // cell's area vs. the sphere's: equal-area means the ratio is constant.
+        let a = Albers {
+            lon0: -96.0,
+            lat0: 37.0,
+            parallels: (29.5, 45.5),
+        };
+        let cell = |lon: f64, lat: f64| {
+            let pts = [
+                (lon, lat),
+                (lon + 1.0, lat),
+                (lon + 1.0, lat + 1.0),
+                (lon, lat + 1.0),
+            ];
+            let p: Vec<(f64, f64)> = pts.iter().map(|&(x, y)| a.project(x, y)).collect();
+            let mut s = 0.0;
+            for i in 0..4 {
+                let (x1, y1) = p[i];
+                let (x2, y2) = p[(i + 1) % 4];
+                s += x1 * y2 - x2 * y1;
+            }
+            s.abs() / 2.0
+        };
+        let sphere = |lat: f64| {
+            let r = AUTHALIC_RADIUS_M;
+            r * r * 1f64.to_radians() * ((lat + 1.0).to_radians().sin() - lat.to_radians().sin())
+        };
+        for (lon, lat) in [(-120.0, 30.0), (-80.0, 30.0), (-100.0, 48.0)] {
+            let ratio = cell(lon, lat) / sphere(lat);
+            assert!((ratio - 1.0).abs() < 2e-3, "ratio {ratio} at {lon},{lat}");
+        }
     }
 
     #[test]

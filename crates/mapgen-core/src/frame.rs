@@ -190,10 +190,50 @@ pub fn anchor(subject: &[MapFeature], mode: FrameMode) -> Option<MultiPolygon<f6
     }
 }
 
-/// Indices of the polygons in the cluster with the largest total area, where
-/// polygons join a cluster when their bounding boxes are within
-/// [`CLUSTER_GAP_KM`] (single linkage).
+/// A group of nearby polygons, with its total (latitude-weighted) area.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cluster {
+    /// Indices into the polygon slice given to [`clusters`].
+    pub members: Vec<usize>,
+    pub weight: f64,
+}
+
+/// Groups polygons whose bounding boxes are within [`CLUSTER_GAP_KM`] of each
+/// other (single linkage), largest total area first. The first cluster is the
+/// main landmass; the others are candidates for insets.
+pub fn clusters(polys: &[Polygon<f64>]) -> Vec<Cluster> {
+    let roots = cluster_roots(polys);
+    let mut by_root: std::collections::BTreeMap<usize, Cluster> = std::collections::BTreeMap::new();
+    for (i, &r) in roots.iter().enumerate() {
+        let lat = polys[i].bounding_rect().map_or(0.0, |b| b.center().y);
+        let w = polys[i].unsigned_area() * cos(lat.to_radians()).abs();
+        let c = by_root.entry(r).or_insert(Cluster {
+            members: Vec::new(),
+            weight: 0.0,
+        });
+        c.members.push(i);
+        c.weight += w;
+    }
+    let mut out: Vec<Cluster> = by_root.into_values().collect();
+    // Heaviest first; ties by first member for determinism.
+    out.sort_by(|a, b| {
+        b.weight
+            .total_cmp(&a.weight)
+            .then(a.members[0].cmp(&b.members[0]))
+    });
+    out
+}
+
 fn main_cluster(polys: &[Polygon<f64>]) -> Vec<usize> {
+    clusters(polys)
+        .into_iter()
+        .next()
+        .map(|c| c.members)
+        .unwrap_or_default()
+}
+
+/// Union-find root (smallest index) of each polygon's cluster.
+fn cluster_roots(polys: &[Polygon<f64>]) -> Vec<usize> {
     let boxes: Vec<Option<Rect<f64>>> = polys.iter().map(|p| p.bounding_rect()).collect();
     let n = polys.len();
     let mut parent: Vec<usize> = (0..n).collect();
@@ -228,17 +268,7 @@ fn main_cluster(polys: &[Polygon<f64>]) -> Vec<usize> {
         }
     }
 
-    let mut weight = vec![0.0; n];
-    for i in 0..n {
-        let r = find(&mut parent, i);
-        let lat = boxes[i].map_or(0.0, |b| b.center().y);
-        weight[r] += polys[i].unsigned_area() * cos(lat.to_radians()).abs();
-    }
-    let best = (0..n).max_by(|&a, &b| weight[a].total_cmp(&weight[b]).then(b.cmp(&a)));
-    match best {
-        Some(root) => (0..n).filter(|&i| find(&mut parent, i) == root).collect(),
-        None => Vec::new(),
-    }
+    (0..n).map(|i| find(&mut parent, i)).collect()
 }
 
 /// Approximate distance in km between two lon/lat boxes (0 if they overlap),

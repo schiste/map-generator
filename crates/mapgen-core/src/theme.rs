@@ -52,25 +52,36 @@ pub struct Theme {
     pub land: Color,
     /// Neighbouring countries drawn for context.
     pub context_land: Color,
-    /// Borders between the mapped regions.
+    /// Borders between the mapped regions (and, thicker, between groups of
+    /// them such as the régions of a département map).
     pub border: Color,
+    /// Outer edge of the mapped area: coasts and the borders with neighbours.
+    pub outline: Color,
     pub context_border: Color,
     pub lake_border: Color,
+    /// Disputed boundary lines, drawn dashed.
+    pub disputed_border: Color,
     pub label: Color,
     pub border_width: f64,
+    /// Width of borders between regions with different parents.
+    pub parent_border_width: f64,
+    pub outline_width: f64,
     pub context_border_width: f64,
+    pub disputed_border_width: f64,
     pub label_size: f64,
 }
 
 /// Names of the colour slots, as used for CSS custom properties (`--mg-<name>`).
-pub const COLOR_SLOTS: [&str; 8] = [
+pub const COLOR_SLOTS: [&str; 10] = [
     "background",
     "water",
     "land",
     "context-land",
     "border",
+    "outline",
     "context-border",
     "lake-border",
+    "disputed-border",
     "label",
 ];
 
@@ -78,17 +89,23 @@ impl Theme {
     pub const NAMES: [&'static str; 4] = ["wikimedia", "light", "dark", "mono"];
 
     pub fn builtin(name: &str) -> Option<Theme> {
+        // Outline and disputed borders default to the border colour.
         let t = |bg, water, land, ctx, border, ctx_border, lake, label| Theme {
             background: Color(String::from(bg)),
             water: Color(String::from(water)),
             land: Color(String::from(land)),
             context_land: Color(String::from(ctx)),
             border: Color(String::from(border)),
+            outline: Color(String::from(border)),
             context_border: Color(String::from(ctx_border)),
             lake_border: Color(String::from(lake)),
+            disputed_border: Color(String::from(border)),
             label: Color(String::from(label)),
             border_width: 0.5,
+            parent_border_width: 1.0,
+            outline_width: 0.8,
             context_border_width: 0.4,
+            disputed_border_width: 0.8,
             label_size: 11.0,
         };
         Some(match name {
@@ -132,8 +149,10 @@ impl Theme {
             "land" | "earth" => &mut self.land,
             "context-land" => &mut self.context_land,
             "border" => &mut self.border,
+            "outline" => &mut self.outline,
             "context-border" => &mut self.context_border,
             "lake-border" => &mut self.lake_border,
+            "disputed-border" => &mut self.disputed_border,
             "label" => &mut self.label,
             _ => {
                 return Err(Error::UnknownColorSlot(
@@ -147,15 +166,17 @@ impl Theme {
     }
 
     /// `(slot name, colour)` pairs in [`COLOR_SLOTS`] order.
-    pub fn colors(&self) -> [(&'static str, &Color); 8] {
+    pub fn colors(&self) -> [(&'static str, &Color); 10] {
         [
             ("background", &self.background),
             ("water", &self.water),
             ("land", &self.land),
             ("context-land", &self.context_land),
             ("border", &self.border),
+            ("outline", &self.outline),
             ("context-border", &self.context_border),
             ("lake-border", &self.lake_border),
+            ("disputed-border", &self.disputed_border),
             ("label", &self.label),
         ]
     }

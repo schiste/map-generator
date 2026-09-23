@@ -74,7 +74,7 @@ fn colors_and_themes_apply() {
         ))
         .unwrap();
     let svg = get(&out, "svg").as_string().unwrap();
-    assert!(svg.contains(".mg-land{fill:#abcdef;"));
+    assert!(svg.contains(".mg-land{fill:#abcdef}"));
     assert!(svg.contains(".mg-background{fill:none}"));
     assert!(svg.contains(".mg-water{fill:#0d1b2a}"), "dark theme water");
 }
