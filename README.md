@@ -113,6 +113,12 @@ mapgen render -i data/ne_10m_admin_0.geojson --dataset ne-admin0 --continent Eur
 mapgen render -i data/ne_10m_admin_0.geojson --dataset ne-admin0 --bbox=-20,25,60,72 -o box.svg
 mapgen render -i data/ne_10m_admin_0.geojson --dataset ne-admin0 --frame world --center-lon 150 -o pacific.svg
 
+# Data reported for units that aren't the map's regions (New York City = 5 counties,
+# health districts…): a table map_id,data_unit_id[,data_unit_name] tags each region with
+# data-unit, or --dissolve merges each unit into one shape. Warns about units that don't
+# nest (a region in two units), units split into parts, and ids not on the map.
+mapgen render … --units units.csv --dissolve
+
 # Disputed borders: Natural Earth's point of view for a country, disputed areas hatched
 scripts/fetch-data.sh ne-worldview IND
 mapgen render … --context data/ne_10m_admin_0.geojson --worldview IND \

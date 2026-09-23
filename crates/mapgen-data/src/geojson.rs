@@ -41,6 +41,7 @@ pub fn rows_from_str(text: &str, query: &LayerQuery) -> Result<Vec<(Option<Strin
                 parent_name: r.parent.as_ref().and(r.parent_name),
                 parent: r.parent,
                 country: r.country.as_deref().and_then(crate::iso::country_alpha2),
+                units: Vec::new(),
                 geometry: into_multipolygon(r.geometry),
             };
             (r.filter, feature)

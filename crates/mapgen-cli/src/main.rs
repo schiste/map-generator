@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use mapgen_core::frame::BBOX_PRESETS;
+use mapgen_core::units::{check_units, dissolve, tag_units, UnitRow};
 use mapgen_core::validate::{self, CheckOptions, IssueKind};
 use mapgen_core::{
     html_page, render, BorderMode, Color, FrameMode, GeoBBox, InsetMode, MapFeature, MapLayers,
@@ -128,6 +129,25 @@ struct InputArgs {
     #[arg(long)]
     credit: bool,
 
+    /// Data-unit table (CSV, TSV or pipe-separated): which map regions make up
+    /// each data unit (e.g. New York City = five counties). Regions get
+    /// `data-unit`; see --dissolve.
+    #[arg(long)]
+    units: Option<PathBuf>,
+    /// Column of --units with the map region's id.
+    #[arg(long, default_value = "map_id", requires = "units")]
+    units_map_column: String,
+    /// Column of --units with the data unit's id.
+    #[arg(long, default_value = "data_unit_id", requires = "units")]
+    units_column: String,
+    /// Column of --units with the data unit's name (optional).
+    #[arg(long, default_value = "data_unit_name", requires = "units")]
+    units_name_column: String,
+    /// Merge each data unit's regions into one shape (their shared borders
+    /// disappear); regions in no unit stay as they are.
+    #[arg(long, requires = "units")]
+    dissolve: bool,
+
     /// Year the boundaries represent, written to the SVG and the credit.
     /// Default: `year` from the data file's `.license.json` (geoBoundaries).
     #[arg(long)]
@@ -212,6 +232,88 @@ impl InputArgs {
             (!credits.is_empty()).then(|| credits.join("; ")),
             share_alike,
         )
+    }
+
+    /// Applies --units to the subject: tags regions with their data unit(s),
+    /// or dissolves them, and warns about units that don't fit the map.
+    fn apply_units(&self, subject: Vec<MapFeature>) -> Result<Vec<MapFeature>> {
+        let Some(path) = &self.units else {
+            return Ok(subject);
+        };
+        let table = read_table(path)?;
+        let (m, u) = (
+            table.column(&self.units_map_column)?,
+            table.column(&self.units_column)?,
+        );
+        let n = table.column(&self.units_name_column).ok();
+        let rows: Vec<UnitRow> = table
+            .rows
+            .iter()
+            .filter_map(|r| {
+                Some(UnitRow {
+                    region: table.cell(r, m)?,
+                    unit: table.cell(r, u)?,
+                    unit_name: n.and_then(|n| table.cell(r, n)),
+                })
+            })
+            .collect();
+        let report = check_units(&subject, &rows);
+        let list = |v: Vec<String>| {
+            let more = v.len().saturating_sub(8);
+            let shown = v.into_iter().take(8).collect::<Vec<_>>().join(", ");
+            if more > 0 {
+                format!("{shown} and {more} more")
+            } else {
+                shown
+            }
+        };
+        if !report.unknown_regions.is_empty() {
+            eprintln!(
+                "warning: {} region id(s) in {} are not on the map: {}",
+                report.unknown_regions.len(),
+                path.display(),
+                list(report.unknown_regions.clone())
+            );
+        }
+        if !report.overlapping.is_empty() {
+            let items = report
+                .overlapping
+                .iter()
+                .map(|(r, u)| format!("{r} ({})", u.join(", ")))
+                .collect();
+            eprintln!(
+                "warning: {} region(s) belong to several units, so those units don't nest{}: {}",
+                report.overlapping.len(),
+                if self.dissolve {
+                    " (dissolved into their first unit)"
+                } else {
+                    ""
+                },
+                list(items)
+            );
+        }
+        if !report.split_units.is_empty() {
+            let items = report
+                .split_units
+                .iter()
+                .map(|(u, n)| format!("{u} ({n} parts)"))
+                .collect();
+            eprintln!(
+                "note: {} unit(s) are not one contiguous shape: {}",
+                report.split_units.len(),
+                list(items)
+            );
+        }
+        if !report.unassigned.is_empty() {
+            eprintln!("note: {} region(s) are in no unit", report.unassigned.len());
+        }
+        let mut subject = subject;
+        if self.dissolve {
+            subject = dissolve(subject, &rows);
+        } else {
+            tag_units(&mut subject, &rows);
+        }
+        Ok(subject)
     }
 
     /// Natural Earth credit, naming the point of view of disputed borders.
@@ -723,6 +825,7 @@ fn run_render(args: RenderArgs) -> Result<()> {
     if layout.repair {
         report_repair(&validate::repair(&mut subject, &CheckOptions::default()));
     }
+    let subject = args.data.apply_units(subject)?;
     let context = args.data.load_context(context_bbox(&subject))?;
 
     let html = is_html(args.format, &args.out);
@@ -1026,6 +1129,7 @@ impl Batch<'_> {
                 notes.push(repair_summary(&r));
             }
         }
+        let subject = args.data.apply_units(subject)?;
         let mut layers = MapLayers {
             context: self.context.countries.clone(),
             lakes: self.context.lakes.clone(),

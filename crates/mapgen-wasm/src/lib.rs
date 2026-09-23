@@ -15,8 +15,8 @@
 mod spec;
 
 pub use spec::{
-    bbox_table, render_map, theme_table, Dataset, LayerSpec, LoadedLayer, LoadedLines, MapOutput,
-    RenderSpec, Sources, SpecError,
+    bbox_table, parse_units, render_map, theme_table, Dataset, LayerSpec, LoadedLayer, LoadedLines,
+    MapOutput, RenderSpec, Sources, SpecError, UnitColumns,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -62,6 +62,8 @@ export interface RenderSpec {
   attribution?: string;
   /** Draw the data credit in the bottom-right corner. */
   credit?: boolean;
+  /** With a data-unit table (setUnits): merge each unit's regions into one shape. */
+  dissolve?: boolean;
   /** Year the boundaries represent: `data-boundary-year` on <svg>, and in the credit. */
   boundaryYear?: string;
   /** Boundary dataset release: `data-source-release` on <svg>. */
@@ -124,8 +126,21 @@ export interface MapGenerator {
   setDisputed(geojson?: string, spec?: LayerSpec): number;
   /** Loads disputed areas, drawn hatched (default: Natural Earth); omit to remove. */
   setDisputedAreas(geojson?: string, spec?: LayerSpec): number;
+  /**
+   * Loads a data-unit table (CSV, TSV or pipe-separated: which map regions make
+   * up each data unit). Regions get `data-unit`, or merge with `dissolve`.
+   * Omit to remove. Returns the number of rows.
+   */
+  setUnits(table?: string, columns?: UnitColumns): number;
   /** Renders a map. */
   render(spec?: RenderSpec): MapOutput;
+}
+
+/** Column names of a data-unit table (defaults: map_id, data_unit_id, data_unit_name). */
+export interface UnitColumns {
+  mapColumn?: string;
+  unitColumn?: string;
+  nameColumn?: string;
 }
 
 export interface MapOutput {
@@ -142,6 +157,15 @@ export interface MapOutput {
   outsideFrame: string[];
   /** Inset boxes: the regions in each and its projection. */
   insets: { ids: string[]; projection: string }[];
+  /** How the data-unit table fits the map (when set). */
+  units?: {
+    unknownRegions: string[];
+    /** [region, units]: regions in several units, i.e. units that don't nest. */
+    overlapping: [string, string[]][];
+    /** [unit, parts]: units that are not one contiguous shape. */
+    splitUnits: [string, number][];
+    unassigned: string[];
+  };
 }
 "##;
 
@@ -206,6 +230,7 @@ pub struct MapGenerator {
     lakes: Option<LoadedLayer>,
     disputed_areas: Option<LoadedLayer>,
     disputed: Option<LoadedLines>,
+    units: Option<Vec<mapgen_core::units::UnitRow>>,
 }
 
 #[wasm_bindgen]
@@ -249,6 +274,23 @@ impl MapGenerator {
     ) -> Result<usize, JsError> {
         self.lakes = load_optional(geojson, spec, Dataset::NeLakes)?;
         Ok(self.lakes.as_ref().map_or(0, LoadedLayer::len))
+    }
+
+    /// Loads a data-unit table. Pass `undefined` to remove it.
+    #[wasm_bindgen(js_name = setUnits, skip_typescript)]
+    pub fn set_units(
+        &mut self,
+        table: Option<String>,
+        columns: Option<js_sys::Object>,
+    ) -> Result<usize, JsError> {
+        self.units = match table {
+            None => None,
+            Some(text) => {
+                let cols: UnitColumns = from_js(columns)?;
+                Some(parse_units(&text, &cols).map_err(js_err)?)
+            }
+        };
+        Ok(self.units.as_ref().map_or(0, Vec::len))
     }
 
     /// Loads disputed areas (default preset: Natural Earth). Pass `undefined`
@@ -299,6 +341,7 @@ impl MapGenerator {
             lakes: self.lakes.as_ref(),
             disputed_areas: self.disputed_areas.as_ref(),
             disputed: self.disputed.as_ref(),
+            units: self.units.as_deref(),
         };
         Ok(to_js(&render_map(src, &spec).map_err(js_err)?)?.unchecked_into())
     }

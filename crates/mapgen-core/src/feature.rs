@@ -20,6 +20,8 @@ pub struct MapFeature {
     /// Lowercase ISO 3166-1 alpha-2 code of the country the feature belongs
     /// to, emitted as a class so tools like Maphue can colour by country.
     pub country: Option<String>,
+    /// Data units the feature belongs to (`data-unit`), see `units`.
+    pub units: Vec<String>,
     pub geometry: MultiPolygon<f64>,
 }
 
@@ -32,6 +34,7 @@ impl Default for MapFeature {
             parent: None,
             parent_name: None,
             country: None,
+            units: Vec::new(),
             geometry: MultiPolygon(vec![]),
         }
     }

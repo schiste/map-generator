@@ -123,6 +123,7 @@ pub fn read_features_in(
             parent,
             parent_name,
             country,
+            units: Vec::new(),
             geometry,
         });
     }

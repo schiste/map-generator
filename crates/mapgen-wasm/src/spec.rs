@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mapgen_core::frame::BBOX_PRESETS;
+use mapgen_core::units::{check_units, dissolve, tag_units, UnitRow};
 use mapgen_core::{
     render, BorderMode, Color, FrameMode, GeoBBox, InsetMode, MapFeature, MapLayers, MapLine,
     ProjectionChoice, RenderOptions, Theme,
@@ -311,6 +312,9 @@ pub struct RenderSpec {
     /// each region strokes its own outline.
     #[serde(default)]
     pub border_mode: Borders,
+    /// With a data-unit table: merge each unit's regions into one shape.
+    #[serde(default)]
+    pub dissolve: bool,
     /// Leader lines for small regions' labels (default true).
     pub leaders: Option<bool>,
     /// Curved labels along long, thin regions (default true).
@@ -444,6 +448,58 @@ fn positive(name: &str, v: Option<f64>) -> Result<Option<f64>> {
     }
 }
 
+/// Column names of a data-unit table (`MapGenerator.setUnits`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+pub struct UnitColumns {
+    pub map_column: String,
+    pub unit_column: String,
+    pub name_column: String,
+}
+
+impl Default for UnitColumns {
+    fn default() -> Self {
+        UnitColumns {
+            map_column: "map_id".into(),
+            unit_column: "data_unit_id".into(),
+            name_column: "data_unit_name".into(),
+        }
+    }
+}
+
+/// Parses a data-unit table (CSV, TSV or pipe-separated).
+pub fn parse_units(text: &str, cols: &UnitColumns) -> Result<Vec<UnitRow>> {
+    let table = mapgen_data::table::parse_table(text).map_err(SpecError)?;
+    let (m, u) = (
+        table.column(&cols.map_column)?,
+        table.column(&cols.unit_column)?,
+    );
+    let n = table.column(&cols.name_column).ok();
+    Ok(table
+        .rows
+        .iter()
+        .filter_map(|r| {
+            Some(UnitRow {
+                region: table.cell(r, m)?,
+                unit: table.cell(r, u)?,
+                unit_name: n.and_then(|n| table.cell(r, n)),
+            })
+        })
+        .collect())
+}
+
+/// How a data-unit table fits the map.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnitReportOutput {
+    pub unknown_regions: Vec<String>,
+    /// `[region, [units…]]`: regions in several units (units that don't nest).
+    pub overlapping: Vec<(String, Vec<String>)>,
+    /// `[unit, parts]`: units that are not one contiguous shape.
+    pub split_units: Vec<(String, usize)>,
+    pub unassigned: Vec<String>,
+}
+
 /// Result of a render, returned to JavaScript.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -464,6 +520,9 @@ pub struct MapOutput {
     /// Ids of subject regions shown nowhere (outside the frame, no inset).
     pub outside_frame: Vec<String>,
     pub insets: Vec<InsetOutput>,
+    /// Present when a data-unit table is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub units: Option<UnitReportOutput>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -480,6 +539,7 @@ pub struct Sources<'a> {
     pub lakes: Option<&'a LoadedLayer>,
     pub disputed_areas: Option<&'a LoadedLayer>,
     pub disputed: Option<&'a LoadedLines>,
+    pub units: Option<&'a [UnitRow]>,
 }
 
 impl Sources<'_> {
@@ -512,8 +572,28 @@ pub fn render_map(src: Sources, spec: &RenderSpec) -> Result<MapOutput> {
         opts.attribution = src.credits();
     }
     let region = spec.region.as_deref();
+    let mut subject = src.subject.select(region)?;
+    let unit_report = src.units.map(|rows| {
+        let r = check_units(&subject, rows);
+        UnitReportOutput {
+            unknown_regions: r.unknown_regions,
+            overlapping: r.overlapping,
+            split_units: r.split_units,
+            unassigned: r.unassigned,
+        }
+    });
+    match (src.units, spec.dissolve) {
+        (Some(rows), true) => subject = dissolve(subject, rows),
+        (Some(rows), false) => tag_units(&mut subject, rows),
+        (None, true) => {
+            return Err(SpecError(
+                "`dissolve` needs a data-unit table (setUnits)".into(),
+            ))
+        }
+        (None, false) => {}
+    }
     let mut layers = MapLayers {
-        subject: src.subject.select(region)?,
+        subject,
         context: src.context.map(LoadedLayer::all).unwrap_or_default(),
         lakes: src.lakes.map(LoadedLayer::all).unwrap_or_default(),
         disputed_areas: src.disputed_areas.map(LoadedLayer::all).unwrap_or_default(),
@@ -544,6 +624,7 @@ pub fn render_map(src: Sources, spec: &RenderSpec) -> Result<MapOutput> {
                 projection: i.projection,
             })
             .collect(),
+        units: unit_report,
     })
 }
 
@@ -595,6 +676,7 @@ mod tests {
                 lakes: None,
                 disputed_areas: None,
                 disputed: None,
+                units: None,
             },
             s,
         )
@@ -668,6 +750,7 @@ mod tests {
             lakes: None,
             disputed_areas: None,
             disputed: None,
+            units: None,
         };
         let out = render_map(src, &spec(r#"{"region": "Westland"}"#).unwrap()).unwrap();
         assert_eq!(out.regions, 1);
@@ -722,6 +805,7 @@ mod tests {
             lakes: Some(&context),
             disputed_areas: None,
             disputed: None,
+            units: None,
         };
         let out = render_map(src, &RenderSpec::default()).unwrap();
         assert!(out.svg.contains(
@@ -753,6 +837,33 @@ mod tests {
             .unwrap()
             .svg
             .contains("<desc"));
+    }
+
+    #[test]
+    fn units_tag_dissolve_and_report() {
+        let rows = parse_units(
+            "map_id,data_unit_id,data_unit_name\nXA-01,U1,Union\nXA-02,U1,Union\nZZ,U2,Ghost\n",
+            &UnitColumns::default(),
+        )
+        .unwrap();
+        let layer = twin();
+        let src = Sources {
+            subject: &layer,
+            context: None,
+            lakes: None,
+            disputed_areas: None,
+            disputed: None,
+            units: Some(&rows),
+        };
+        let tagged = render_map(src, &RenderSpec::default()).unwrap();
+        assert!(tagged.svg.contains(r#"data-code="XA-01" data-unit="U1""#));
+        let report = tagged.units.unwrap();
+        assert_eq!(report.unknown_regions, ["ZZ"]);
+        let merged = render_map(src, &spec(r#"{"dissolve": true}"#).unwrap()).unwrap();
+        assert_eq!(merged.regions, 1);
+        assert!(merged.svg.contains(r#"<path id="U1""#));
+        let no_table = Sources { units: None, ..src };
+        assert!(render_map(no_table, &spec(r#"{"dissolve": true}"#).unwrap()).is_err());
     }
 
     #[test]

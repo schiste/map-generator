@@ -11,6 +11,10 @@ gen.setLakes("{}", { dataset: "ne-lakes" });
 gen.setDisputed("{}", { dataset: "ne-disputed" });
 gen.setDisputed();
 gen.setDisputedAreas("{}", { dataset: "ne-disputed-areas" });
+gen.setUnits("map_id,data_unit_id\nA,U\n");
+gen.setUnits("region|unit\nA|U\n", { mapColumn: "region", unitColumn: "unit" });
+gen.setUnits();
+const splitUnits: [string, number][] | undefined = gen.render({ dissolve: true }).units?.splitUnits;
 gen.setSubject("{}", { dataset: "ne-admin0", worldview: "IND" });
 gen.setSubject("{}", { dataset: "geoboundaries", parentProperty: "parent" });
 gen.setSubject("{}", { parentNameProperty: "state", countryProperty: "iso3" });
@@ -65,4 +69,4 @@ gen.render({ projection: "mercator" });
 // @ts-expect-error insets is "auto" | "none"
 gen.render({ insets: true });
 
-export { n, svg, proj, regions, water, europe, v, insetIds };
+export { n, svg, proj, regions, water, europe, v, insetIds, splitUnits };

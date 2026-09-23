@@ -342,12 +342,17 @@ fn path_element(id: &str, layer_class: &str, f: &MapFeature, d: &str) -> String 
         .as_deref()
         .map(|p| format!(" data-parent=\"{}\"", escape(p)))
         .unwrap_or_default();
+    let units = if f.units.is_empty() {
+        String::new()
+    } else {
+        format!(" data-unit=\"{}\"", escape(&f.units.join(" ")))
+    };
     let title = match &f.parent_name {
         Some(p) if *p != f.name => format!("{}, {p}", f.name),
         _ => f.name.clone(),
     };
     format!(
-        "<path id=\"{}\" class=\"{}\" data-name=\"{}\" data-code=\"{}\"{parent} d=\"{d}\"><title>{}</title></path>",
+        "<path id=\"{}\" class=\"{}\" data-name=\"{}\" data-code=\"{}\"{parent}{units} d=\"{d}\"><title>{}</title></path>",
         escape(id),
         escape(&classes.join(" ")),
         escape(&f.name),
