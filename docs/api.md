@@ -60,6 +60,7 @@ const regions = await api.features("ne-admin1", "FRA"); // codes, names, parents
 | --- | --- |
 | `ne-admin0` | countries (`FRA`), continents (`Europe`, `South America`), `world`; points of view with `worldview=` |
 | `ne-admin1` | first-level subdivisions of a country (`FRA` gives départements, with régions as parents) |
+| `mixed` | countries and single subdivisions together: `DEU,FR-75,Bavaria` (codes, names in any language, Wikidata items; a name shared by both means the country) |
 | `us-counties` | `USA`: counties with FIPS codes (`US-31109`), states as parents |
 | `geoboundaries-adm1` | one country per file (`FRA`), each with its own licence |
 

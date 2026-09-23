@@ -238,6 +238,23 @@ test("parity: Italy with capitals and neighbour names", { skip: skipUnless(hasNE
   assert.doesNotMatch(gen.render({ region: "ITA", capitals: "all" }).svg, /mg-place/);
 });
 
+test("mixed levels: countries and single subdivisions", { skip: skipUnless(hasNE) }, () => {
+  const gen = withContext(ne.admin0, { dataset: "ne-admin0" });
+  assert.equal(gen.setSubdivisions(ne.admin1, { dataset: "ne-admin1" }), gen.subdivisions().length);
+  assert.ok(gen.subdivisions().some((s) => s.code === "FR-67" && s.parentName));
+  const { codes, unknown } = gen.resolveRegions(["Switzerland", "Bayern", "fr-67", "Atlantis"]);
+  assert.deepEqual(codes, ["CHE", "DE-BY", "FR-67"]);
+  assert.deepEqual(unknown, ["Atlantis"]);
+  const out = gen.render({ regions: codes, width: 600 });
+  assert.equal(out.regions, 3);
+  for (const code of codes) assert.ok(out.svg.includes(`data-code="${code}"`), code);
+  // Countries only: the subdivisions play no part.
+  assert.equal(gen.render({ regions: ["CHE"] }).regions, 1);
+  assert.throws(() => gen.render({ regions: ["DEU", "DE-BY"] }), /lies in Germany/);
+  gen.setSubdivisions();
+  assert.throws(() => gen.render({ regions: ["DE-BY"] }), /DE-BY/);
+});
+
 test("parity: Fiji with CSS custom properties", { skip: skipUnless(hasNE) }, () => {
   const out = withContext(ne.admin1, { dataset: "ne-admin1" }).render({
     region: "FJI",

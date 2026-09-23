@@ -120,6 +120,16 @@ licence_url = "https://www.naturalearthdata.com/about/terms-of-use/"
 release = "$ne_release"
 
 [[dataset]]
+id = "mixed"
+title = "Countries and single first-level subdivisions, mixed (Natural Earth 1:10m)"
+preset = "ne-admin0"
+compose = ["ne-admin0", "ne-admin1"]
+languages = true
+licence = "Public domain"
+licence_url = "https://www.naturalearthdata.com/about/terms-of-use/"
+release = "$ne_release"
+
+[[dataset]]
 id = "us-counties"
 title = "US counties with FIPS codes (US-31109), states as parents (geoBoundaries, US Census)"
 preset = "geoboundaries"

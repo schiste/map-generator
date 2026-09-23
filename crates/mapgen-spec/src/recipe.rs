@@ -185,6 +185,7 @@ pub fn dataset_alias(value: &str) -> String {
     match value.trim().to_lowercase().as_str() {
         "countries" | "country" | "world" => "ne-admin0".into(),
         "subdivisions" | "states" | "provinces" | "admin1" => "ne-admin1".into(),
+        "mixed" | "countries and subdivisions" => "mixed".into(),
         v => v.to_owned(),
     }
 }

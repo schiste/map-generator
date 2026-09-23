@@ -31,7 +31,8 @@ projection,laea
 ```
 
 - **`dataset`**: `countries` (Natural Earth countries, `ne-admin0`), `subdivisions` (states,
-  provinces, départements of the chosen countries, `ne-admin1`), or any dataset id from
+  provinces, départements of the chosen countries, `ne-admin1`), `mixed` (countries and single
+  subdivisions together: `regions,Germany;FR-75;Bavaria`), or any dataset id from
   [`/api/v1/datasets`](https://map-generator.toolforge.org/api/v1/datasets), e.g. `us-counties` or
   `geoboundaries-adm1`.
 - **`region`**, one row per region: a code (`FRA`), a name (`France`, or a name in another

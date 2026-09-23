@@ -2,7 +2,7 @@
 //! directory, with their regions indexed at startup, and the layers every
 //! map shares (neighbouring countries, lakes, disputed borders).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -44,8 +44,12 @@ pub struct DatasetConfig {
     pub preset: Preset,
     /// One file holding every region (told apart by the preset's region column)...
     pub file: Option<String>,
-    /// ...or one file per region: `geoboundaries/{region}-ADM1.gpkg`.
+    /// ...or one file per region: `geoboundaries/{region}-ADM1.gpkg`...
     pub files: Option<String>,
+    /// ...or datasets listed before, mixed: the countries of a Natural Earth
+    /// Admin-0 dataset and every single subdivision of an Admin-1 one.
+    #[serde(default)]
+    pub compose: Vec<String>,
     /// Administrative level, e.g. `ADM1`.
     pub level: Option<String>,
     /// More region columns, e.g. `CONTINENT`.
@@ -95,6 +99,11 @@ pub struct Region {
     pub file: PathBuf,
     /// Column compared against `code`; `None` for the whole file.
     pub column: Option<String>,
+    /// Property layout of `file` (the dataset's, except in mixed datasets).
+    pub preset: Preset,
+    /// 0 for regions, 1 for the subdivisions of a mixed dataset: a name
+    /// shared by both (Luxembourg) means the country.
+    pub level: u8,
     pub provenance: Provenance,
 }
 
@@ -259,7 +268,11 @@ impl Registry {
             if datasets.contains_key(&d.id) {
                 return Err(format!("dataset {:?} is listed twice", d.id));
             }
-            let regions = index_regions(dir, &d, &names)?;
+            let regions = if d.compose.is_empty() {
+                index_regions(dir, &d, &names)?
+            } else {
+                compose_regions(&d, &datasets)?
+            };
             datasets.insert(d.id.clone(), DatasetEntry { config: d, regions });
         }
         Ok(Registry {
@@ -360,7 +373,7 @@ impl Registry {
                 }
                 _ => region.provenance.credit.clone(),
             }),
-            ..LayerSpec::with_dataset(dataset.config.preset)
+            ..LayerSpec::with_dataset(region.preset)
         }
     }
 
@@ -414,6 +427,8 @@ fn index_regions(
                         code,
                         file: path.clone(),
                         column: Some(column.clone()),
+                        preset: d.preset,
+                        level: 0,
                         provenance: provenance.clone(),
                     });
                 }
@@ -427,6 +442,8 @@ fn index_regions(
                         aliases: Vec::new(),
                         file: path.clone(),
                         column: None,
+                        preset: d.preset,
+                        level: 0,
                         provenance,
                     },
                 );
@@ -465,6 +482,8 @@ fn index_regions(
                         provenance: provenance(&path, d),
                         file: path,
                         column: None,
+                        preset: d.preset,
+                        level: 0,
                     },
                 );
             }
@@ -474,6 +493,95 @@ fn index_regions(
                 "dataset {}: set exactly one of `file` and `files`",
                 d.id
             ))
+        }
+    }
+    if regions.is_empty() {
+        return Err(format!("dataset {} has no regions", d.id));
+    }
+    Ok(regions)
+}
+
+/// The regions of a mixed dataset: the countries of its Admin-0 part, and
+/// each subdivision of its Admin-1 part as a region of its own.
+fn compose_regions(
+    d: &DatasetConfig,
+    datasets: &BTreeMap<String, DatasetEntry>,
+) -> Result<BTreeMap<String, Region>> {
+    let mut regions = BTreeMap::new();
+    for id in &d.compose {
+        let part = datasets
+            .get(id)
+            .ok_or_else(|| format!("dataset {}: compose {id:?} must be listed before it", d.id))?;
+        match part.config.preset {
+            Preset::NeAdmin0 => {
+                let column = LayerSpec::with_dataset(Preset::NeAdmin0)
+                    .query()
+                    .filter_column;
+                for r in part.regions.values().filter(|r| r.column == column) {
+                    regions.entry(r.code.clone()).or_insert_with(|| r.clone());
+                }
+            }
+            Preset::NeAdmin1 => {
+                let path = part
+                    .regions
+                    .values()
+                    .next()
+                    .map(|r| r.file.clone())
+                    .ok_or_else(|| format!("dataset {id} has no file"))?;
+                let spec = LayerSpec {
+                    languages: NE_LANGUAGES.iter().map(|l| l.to_string()).collect(),
+                    ..LayerSpec::with_dataset(Preset::NeAdmin1)
+                };
+                let mut q = spec.query();
+                q.filter_column = None;
+                let features = mapgen_data::read_layer(&path, &q, None)
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
+                // Ids are ISO 3166-2 codes, else Natural Earth's adm1_code:
+                // the column to read a subdivision back by.
+                let mut q = spec.query();
+                q.filter_column = Some("iso_3166_2".into());
+                let iso: BTreeSet<String> = mapgen_data::list_regions(&path, &q)
+                    .map_err(|e| format!("{}: {e}", path.display()))?
+                    .into_iter()
+                    .collect();
+                let provenance = part
+                    .regions
+                    .values()
+                    .next()
+                    .map(|r| r.provenance.clone())
+                    .unwrap_or_default();
+                for f in features {
+                    let column = if iso.contains(&f.id) {
+                        "iso_3166_2"
+                    } else {
+                        "adm1_code"
+                    };
+                    let mut aliases: Vec<String> = f
+                        .names
+                        .values()
+                        .chain(f.wikidata.as_ref())
+                        .map(|a| a.to_lowercase())
+                        .collect();
+                    aliases.sort();
+                    aliases.dedup();
+                    regions.entry(f.id.clone()).or_insert_with(|| Region {
+                        name: f.name.clone(),
+                        aliases,
+                        file: path.clone(),
+                        column: Some(column.into()),
+                        preset: Preset::NeAdmin1,
+                        level: 1,
+                        provenance: provenance.clone(),
+                        code: f.id,
+                    });
+                }
+            }
+            other => {
+                return Err(format!(
+                    "dataset {}: compose takes ne-admin0 and ne-admin1 datasets, not {other:?}",
+                    d.id
+                ))
+            }
         }
     }
     if regions.is_empty() {

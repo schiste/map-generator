@@ -350,10 +350,15 @@ fn select<'a>(d: &'a DatasetEntry, spec: &str) -> ApiResult<Selection<'a>> {
             .get(input)
             .or_else(|| {
                 let lower = input.to_lowercase();
-                d.regions.values().find(|r| {
-                    r.code.eq_ignore_ascii_case(input)
-                        || r.name.to_lowercase() == lower
-                        || r.aliases.contains(&lower)
+                let code = d
+                    .regions
+                    .values()
+                    .find(|r| r.code.eq_ignore_ascii_case(input));
+                code.or_else(|| {
+                    d.regions
+                        .values()
+                        .filter(|r| r.name.to_lowercase() == lower || r.aliases.contains(&lower))
+                        .min_by_key(|r| r.level)
                 })
             })
             .ok_or_else(|| {

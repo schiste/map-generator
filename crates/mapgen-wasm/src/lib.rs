@@ -157,6 +157,14 @@ export interface MapGenerator {
    */
   setPlaces(geojson?: string, languages?: string[]): number;
   /**
+   * Loads subdivisions (default: Natural Earth Admin-1) to mix with the countries
+   * of the subject: `regions` may then name countries and single subdivisions
+   * (`["DEU", "FR-75", "Bavaria"]`). Omit `geojson` to remove them.
+   */
+  setSubdivisions(geojson?: string, spec?: LayerSpec): number;
+  /** The loaded subdivisions (setSubdivisions), for pickers. */
+  subdivisions(): Subdivision[];
+  /**
    * Loads a data-unit table (CSV, TSV or pipe-separated: which map regions make
    * up each data unit). Regions get `data-unit`, or merge with `dissolve`.
    * Omit to remove. Returns the number of rows.
@@ -176,6 +184,18 @@ export interface MapGenerator {
    * codes the map lacks usually mean data and boundaries from different years.
    */
   matchCodes(spec: MatchSpec): MatchOutput;
+}
+
+export interface Subdivision {
+  /** Code, e.g. "FR-75". */
+  code: string;
+  name: string;
+  /** Lowercase ISO 3166-1 alpha-2 of its country, when known. */
+  iso2?: string;
+  /** The enclosing unit's name, e.g. "Île-de-France", when known. */
+  parentName?: string;
+  wikidata?: string;
+  names: Record<string, string>;
 }
 
 export interface Country {
@@ -363,6 +383,7 @@ pub struct MapGenerator {
     disputed_areas: Option<LoadedLayer>,
     disputed: Option<LoadedLines>,
     places: Option<Vec<mapgen_core::MapPlace>>,
+    subdivisions: Option<LoadedLayer>,
     units: Option<Vec<mapgen_core::units::UnitRow>>,
 }
 
@@ -477,6 +498,33 @@ impl MapGenerator {
         Ok(self.places.as_ref().map_or(0, Vec::len))
     }
 
+    /// Loads subdivisions to mix with the subject's countries. Pass
+    /// `undefined` to remove them.
+    #[wasm_bindgen(js_name = setSubdivisions, skip_typescript)]
+    pub fn set_subdivisions(
+        &mut self,
+        geojson: Option<String>,
+        spec: Option<LayerSpecJs>,
+    ) -> Result<usize, JsError> {
+        self.subdivisions = load_optional(geojson, spec, Dataset::NeAdmin1)?;
+        Ok(self.subdivisions.as_ref().map_or(0, LoadedLayer::len))
+    }
+
+    /// The loaded subdivisions, for pickers.
+    #[wasm_bindgen(skip_typescript)]
+    pub fn subdivisions(&self) -> Result<JsValue, JsError> {
+        let list: Vec<serde_json::Value> = self
+            .subdivisions
+            .iter()
+            .flat_map(LoadedLayer::features)
+            .map(|f| {
+                serde_json::json!({ "code": f.id, "name": f.name, "iso2": f.country,
+                    "parentName": f.parent_name, "wikidata": f.wikidata, "names": f.names })
+            })
+            .collect();
+        to_js(&list)
+    }
+
     /// Distinct region codes in the subject layer, sorted.
     pub fn regions(&self) -> Result<Vec<String>, JsError> {
         Ok(self.subject()?.regions())
@@ -485,9 +533,27 @@ impl MapGenerator {
     /// Renders a map.
     #[wasm_bindgen(skip_typescript)]
     pub fn render(&self, spec: Option<RenderSpecJs>) -> Result<MapOutputJs, JsError> {
-        let spec: RenderSpec = from_js(spec)?;
+        let mut spec: RenderSpec = from_js(spec)?;
+        // Mixed levels: when something asked for isn't a country, compose
+        // the subject from countries and single subdivisions.
+        let mixed = match (&self.subdivisions, &spec.regions, &spec.region) {
+            (Some(parts), Some(list), None) => {
+                let subject = self.subject()?;
+                if subject.select_many(list).is_ok() {
+                    None
+                } else {
+                    let (layer, codes) = subject.compose(parts, list).map_err(js_err)?;
+                    spec.regions = Some(codes);
+                    Some(layer)
+                }
+            }
+            _ => None,
+        };
         let src = Sources {
-            subject: self.subject()?,
+            subject: match &mixed {
+                Some(layer) => layer,
+                None => self.subject()?,
+            },
             context: self.context.as_ref(),
             lakes: self.lakes.as_ref(),
             disputed_areas: self.disputed_areas.as_ref(),
@@ -522,9 +588,18 @@ impl MapGenerator {
 
     #[wasm_bindgen(js_name = resolveRegions, skip_typescript)]
     pub fn resolve_regions(&self, inputs: Vec<String>) -> Result<JsValue, JsError> {
-        let (codes, unknown) = self
+        let (mut codes, mut unknown) = self
             .subject()?
             .resolve_regions(&inputs, self.context.as_ref());
+        if let Some(parts) = &self.subdivisions {
+            let (more, rest) = parts.find_features(&unknown);
+            codes.extend(
+                more.into_iter()
+                    .filter(|c| !codes.contains(c))
+                    .collect::<Vec<_>>(),
+            );
+            unknown = rest;
+        }
         to_js(&serde_json::json!({ "codes": codes, "unknown": unknown }))
     }
 

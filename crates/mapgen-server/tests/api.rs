@@ -653,3 +653,93 @@ async fn regions_by_iso2_and_names_in_other_languages() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[tokio::test]
+async fn mixed_levels_countries_and_single_subdivisions() {
+    let dir = std::env::temp_dir().join(format!("mapgen-server-test-mixed-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let square = |x: f64| {
+        format!(
+            "[[[{x},45],[{x1},45],[{x1},46],[{x},46],[{x},45]]]",
+            x1 = x + 1.0
+        )
+    };
+    let country = |a3: &str, a2: &str, name: &str, x: f64| {
+        format!(
+            r#"{{"type":"Feature","properties":{{"ADM0_A3":"{a3}","ISO_A2_EH":"{a2}","NAME":"{name}"}},"geometry":{{"type":"Polygon","coordinates":{}}}}}"#,
+            square(x)
+        )
+    };
+    let sub = |iso: &str, adm1: &str, a3: &str, a2: &str, name: &str, x: f64| {
+        format!(
+            r#"{{"type":"Feature","properties":{{"iso_3166_2":"{iso}","adm1_code":"{adm1}","adm0_a3":"{a3}","iso_a2":"{a2}","name":"{name}","name_fr":"{name} (fr)"}},"geometry":{{"type":"Polygon","coordinates":{}}}}}"#,
+            square(x)
+        )
+    };
+    let fc = |f: Vec<String>| {
+        format!(
+            r#"{{"type":"FeatureCollection","features":[{}]}}"#,
+            f.join(",")
+        )
+    };
+    std::fs::write(
+        dir.join("countries.geojson"),
+        fc(vec![
+            country("DEU", "DE", "Germany", 10.0),
+            country("LUX", "LU", "Luxembourg", 16.0),
+        ]),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("subdivisions.geojson"),
+        fc(vec![
+            // A province named like a country: the name means the country.
+            sub("BE-WLX", "BEL-1", "BEL", "BE", "Luxembourg", 12.0),
+            // No ISO 3166-2 code: read back by adm1_code.
+            sub("-99", "FRA-5", "FRA", "FR", "Clipperton", 14.0),
+            sub("DE-BY", "DEU-1", "DEU", "DE", "Bayern", 10.2),
+        ]),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("datasets.toml"),
+        "[context]\ncountries = \"countries.geojson\"\n\n\
+         [[dataset]]\nid = \"countries\"\ntitle = \"Countries\"\npreset = \"ne-admin0\"\nfile = \"countries.geojson\"\n\n\
+         [[dataset]]\nid = \"subdivisions\"\ntitle = \"Subdivisions\"\npreset = \"ne-admin1\"\nfile = \"subdivisions.geojson\"\n\n\
+         [[dataset]]\nid = \"mixed\"\ntitle = \"Countries and subdivisions\"\npreset = \"ne-admin0\"\nlanguages = true\ncompose = [\"countries\", \"subdivisions\"]\n",
+    )
+    .unwrap();
+    let settings = Settings {
+        data_dir: dir.clone(),
+        cache_dir: None,
+        cache_max_bytes: 0,
+        max_concurrent: 2,
+        render_timeout: Duration::from_secs(20),
+        www_dir: None,
+        max_width: 4000,
+    };
+    let app = app(Arc::new(AppState::new(settings).unwrap()));
+    let r = get(&app, "/api/v1/maps/mixed/Luxembourg,be-wlx,FRA-5.svg").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(
+        r.header("content-location"),
+        "/api/v1/maps/mixed/BE-WLX,FRA-5,LUX.svg"
+    );
+    let svg = r.text();
+    assert!(svg.contains("data-code=\"LUX\""));
+    assert!(svg.contains("data-code=\"BE-WLX\""));
+    assert!(svg.contains("data-code=\"FRA-5\""));
+    // Names in other languages reach single subdivisions too.
+    let r = get(&app, "/api/v1/maps/mixed/Clipperton%20(fr).svg").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    // A country and one of its own subdivisions would overlap.
+    let r = get(&app, "/api/v1/maps/mixed/DEU,DE-BY.svg").await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert!(
+        r.text().contains("Bayern (DE-BY) lies in Germany (DEU)"),
+        "{}",
+        r.text()
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

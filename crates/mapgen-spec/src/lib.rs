@@ -316,9 +316,112 @@ impl LoadedLayer {
         (found, unknown)
     }
 
+    /// Single features for what people type: codes (`FR-75`, any case),
+    /// names in any language loaded, Wikidata items. A name shared by
+    /// several features picks the first by code; codes are unambiguous.
+    /// Returns the codes found and the inputs that matched nothing.
+    pub fn find_features(&self, inputs: &[String]) -> (Vec<String>, Vec<String>) {
+        let norm = |s: &str| s.trim().to_lowercase();
+        let mut lookup: BTreeMap<String, &str> = BTreeMap::new();
+        for f in self.features() {
+            for key in std::iter::once(&f.name)
+                .chain(f.names.values())
+                .chain(f.wikidata.as_ref())
+            {
+                lookup.entry(norm(key)).or_insert(&f.id);
+            }
+        }
+        for f in self.features() {
+            lookup.insert(norm(&f.id), &f.id);
+        }
+        let (mut found, mut unknown) = (Vec::new(), Vec::new());
+        for input in inputs {
+            match lookup.get(&norm(input)) {
+                Some(code) if !found.iter().any(|c| c == code) => found.push((*code).to_owned()),
+                Some(_) => {}
+                None => unknown.push(input.clone()),
+            }
+        }
+        (found, unknown)
+    }
+
+    /// A layer mixing levels: whole regions of this layer (countries) and
+    /// single features of `parts` (subdivisions), for what people type.
+    /// Countries are looked up first. Returns the layer, with each
+    /// feature's region value set to what it was picked by, and those
+    /// values in the order given.
+    pub fn compose(
+        &self,
+        parts: &LoadedLayer,
+        inputs: &[String],
+    ) -> Result<(LoadedLayer, Vec<String>)> {
+        let (regions, rest) = self.resolve_regions(inputs, None);
+        let (features, unknown) = parts.find_features(&rest);
+        if !unknown.is_empty() {
+            return Err(SpecError(format!(
+                "no country or subdivision {}",
+                unknown
+                    .iter()
+                    .map(|u| format!("{u:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
+        let mut rows: Vec<(Option<String>, MapFeature)> = self
+            .rows
+            .iter()
+            .filter(|(v, _)| v.as_ref().is_some_and(|v| regions.contains(v)))
+            .cloned()
+            .collect();
+        rows.extend(
+            parts
+                .features()
+                .filter(|f| features.contains(&f.id))
+                .map(|f| (Some(f.id.clone()), f.clone())),
+        );
+        // Inputs in their order, whichever level they matched.
+        let mut codes = Vec::new();
+        for input in inputs {
+            let one = std::slice::from_ref(input);
+            let code = self
+                .resolve_regions(one, None)
+                .0
+                .pop()
+                .or_else(|| parts.find_features(one).0.pop());
+            if let Some(code) = code.filter(|c| !codes.contains(c)) {
+                codes.push(code);
+            }
+        }
+        Ok((
+            LoadedLayer::from_rows(rows, true, self.credit.clone()),
+            codes,
+        ))
+    }
+
     fn all(&self) -> Vec<MapFeature> {
         self.rows.iter().map(|(_, f)| f.clone()).collect()
     }
+}
+
+/// Mixed levels: a subdivision drawn together with its own country would
+/// be drawn twice, one on top of the other.
+fn check_levels(subject: &[MapFeature]) -> Result<()> {
+    let countries: BTreeMap<String, &MapFeature> = subject
+        .iter()
+        .filter(|f| f.class == "country")
+        .filter_map(|f| Some((f.country.as_ref()?.to_lowercase(), f)))
+        .collect();
+    let clash = subject
+        .iter()
+        .filter(|f| f.class != "country")
+        .find_map(|f| {
+            let c = countries.get(&f.country.as_ref()?.to_lowercase())?;
+            Some(format!(
+                "{} ({}) lies in {} ({}), also on the map: pick one or the other",
+                f.name, f.id, c.name, c.id
+            ))
+        });
+    clash.map_or(Ok(()), |e| Err(SpecError(e)))
 }
 
 /// "Natural Earth (de facto view)", or the layer's point of view.
@@ -810,6 +913,7 @@ pub fn render_map(src: Sources, spec: &RenderSpec) -> Result<MapOutput> {
         (_, Some(list)) => src.subject.select_many(list)?,
         (_, None) => src.subject.select(region)?,
     };
+    check_levels(&subject)?;
     let unit_report = src.units.map(|rows| {
         let r = check_units(&subject, rows);
         UnitReportOutput {
@@ -1181,6 +1285,106 @@ mod tests {
         let html = render_twin(&spec(r#"{"format": "html"}"#).unwrap()).unwrap();
         assert!(html.html.unwrap().contains("Download SVG"));
         assert!(html.svg.contains("var(--mg-water,"));
+    }
+
+    /// Two countries and two subdivisions, in Natural Earth's layouts.
+    fn mixed_layers() -> (LoadedLayer, LoadedLayer) {
+        let square = |x: f64| {
+            format!(
+                "[[[{x},45],[{},45],[{},46],[{x},46],[{x},45]]]",
+                x + 1.0,
+                x + 1.0
+            )
+        };
+        let country = |a3: &str, a2: &str, name: &str, x: f64| {
+            format!(
+                r#"{{"type":"Feature","properties":{{"ADM0_A3":"{a3}","ISO_A2_EH":"{a2}","NAME":"{name}"}},"geometry":{{"type":"Polygon","coordinates":{}}}}}"#,
+                square(x)
+            )
+        };
+        let sub = |iso: &str, a3: &str, a2: &str, name: &str, qid: &str, x: f64| {
+            format!(
+                r#"{{"type":"Feature","properties":{{"iso_3166_2":"{iso}","adm1_code":"{a3}-1","adm0_a3":"{a3}","iso_a2":"{a2}","name":"{name}","wikidataid":"{qid}"}},"geometry":{{"type":"Polygon","coordinates":{}}}}}"#,
+                square(x)
+            )
+        };
+        let fc = |features: Vec<String>| {
+            format!(
+                r#"{{"type":"FeatureCollection","features":[{}]}}"#,
+                features.join(",")
+            )
+        };
+        let countries = LoadedLayer::parse(
+            &fc(vec![
+                country("DEU", "DE", "Germany", 10.0),
+                country("NLD", "NL", "Netherlands", 12.0),
+            ]),
+            &LayerSpec::with_dataset(Dataset::NeAdmin0),
+        )
+        .unwrap();
+        let subdivisions = LoadedLayer::parse(
+            &fc(vec![
+                sub("NL-UT", "NLD", "NL", "Utrecht", "Q776", 12.2),
+                sub("XX-01", "XXX", "XX", "Nordland", "Q50627", 14.0),
+            ]),
+            &LayerSpec::with_dataset(Dataset::NeAdmin1),
+        )
+        .unwrap();
+        (countries, subdivisions)
+    }
+
+    #[test]
+    fn mixed_levels() {
+        let (countries, subdivisions) = mixed_layers();
+        let inputs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            subdivisions.find_features(&inputs(&["nl-ut", "Q50627", "Atlantis"])),
+            (inputs(&["NL-UT", "XX-01"]), inputs(&["Atlantis"]))
+        );
+        let (layer, codes) = countries
+            .compose(&subdivisions, &inputs(&["Nordland", "Germany", "de"]))
+            .unwrap();
+        assert_eq!(codes, ["XX-01", "DEU"], "in the order given, once each");
+        let src = Sources {
+            subject: &layer,
+            context: Some(&countries),
+            lakes: None,
+            disputed_areas: None,
+            disputed: None,
+            places: None,
+            units: None,
+        };
+        let spec = RenderSpec {
+            regions: Some(codes),
+            ..spec("{}").unwrap()
+        };
+        let out = render_map(src, &spec).unwrap();
+        assert_eq!(out.regions, 2);
+        assert!(out.svg.contains("class=\"mg-land country de\""));
+        assert!(out.svg.contains("class=\"mg-land subdivision xx\""));
+        // The Netherlands and one of its provinces would overlap.
+        let (layer, codes) = countries
+            .compose(&subdivisions, &inputs(&["NLD", "Utrecht"]))
+            .unwrap();
+        let src = Sources {
+            subject: &layer,
+            ..src
+        };
+        let spec = RenderSpec {
+            regions: Some(codes),
+            ..spec
+        };
+        let err = render_map(src, &spec).unwrap_err();
+        assert!(
+            err.0.contains("Utrecht (NL-UT) lies in Netherlands (NLD)"),
+            "{}",
+            err.0
+        );
+        let err = countries
+            .compose(&subdivisions, &inputs(&["Atlantis"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert!(err.0.contains("\"Atlantis\""));
     }
 
     #[test]
