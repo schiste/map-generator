@@ -740,9 +740,31 @@ impl LicenseFile {
     }
 }
 
+/// Reads `<data>.license.json`. A missing file is normal; a file that exists
+/// but can't be read or parsed is reported once, since silently dropping it
+/// would drop a required credit.
 fn read_license(data: &Path) -> Option<LicenseFile> {
-    let text = std::fs::read_to_string(data.with_extension("license.json")).ok()?;
-    serde_json::from_str(&text).ok()
+    let path = data.with_extension("license.json");
+    if !path.exists() {
+        return None;
+    }
+    let parsed = std::fs::read_to_string(&path)
+        .map_err(anyhow::Error::from)
+        .and_then(|text| serde_json::from_str(&text).map_err(anyhow::Error::from));
+    match parsed {
+        Ok(l) => Some(l),
+        Err(e) => {
+            static WARNED: std::sync::Mutex<BTreeSet<PathBuf>> =
+                std::sync::Mutex::new(BTreeSet::new());
+            if WARNED.lock().is_ok_and(|mut w| w.insert(path.clone())) {
+                eprintln!(
+                    "warning: ignoring unreadable licence file {}: {e}",
+                    path.display()
+                );
+            }
+            None
+        }
+    }
 }
 
 fn report_license(input: &InputArgs, data: &Path) {
@@ -824,6 +846,25 @@ mod tests {
         std::fs::write(dir.join("sub/FRA-ADM1.geojson"), "").unwrap();
         let dup = expand_inputs(&[dir.clone(), dir.join("sub/FRA-ADM1.geojson")]);
         assert!(dup.is_err(), "duplicate stems must be rejected");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reads_utf8_sidecars_and_rejects_broken_ones() {
+        let dir = std::env::temp_dir().join(format!("mapgen-lic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let data = dir.join("FRA-ADM1.geojson");
+        let sidecar = dir.join("FRA-ADM1.license.json");
+        std::fs::write(
+            &sidecar,
+            r#"{"license":"Etalab","source":"géographique","via":"geoBoundaries"}"#,
+        )
+        .unwrap();
+        assert_eq!(read_license(&data).unwrap().source, "géographique");
+        // cp1252 "é" is invalid UTF-8: must be reported (not a panic), and yield no credit.
+        std::fs::write(&sidecar, b"{\"license\":\"x\",\"source\":\"g\xe9o\"}").unwrap();
+        assert!(read_license(&data).is_none());
+        assert!(read_license(&dir.join("missing.geojson")).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

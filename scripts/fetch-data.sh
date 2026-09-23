@@ -86,7 +86,8 @@ for m in metas:
         "iso": iso,
         "level": lvl,
     }
-    with open(os.path.join(out, f"{iso}-{lvl}.license.json"), "w") as f:
+    # Explicit UTF-8 and \n: Windows would otherwise write cp1252 and \r\n.
+    with open(os.path.join(out, f"{iso}-{lvl}.license.json"), "w", encoding="utf-8", newline="\n") as f:
         json.dump(sidecar, f, indent=2, ensure_ascii=False)
         f.write("\n")
     print(f"{dest}  [{m['boundaryLicense']}; {m['boundarySource']}]")
