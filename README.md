@@ -88,6 +88,12 @@ mapgen render -i data/ne_10m_admin_0.geojson --dataset ne-admin0 --frame world -
 # Every country's Admin-1 map, in parallel
 mapgen batch -i data/ne_10m_admin_1.geojson --dataset ne-admin1 --context data/ne_10m_admin_0.geojson --out-dir out/
 
+# Many geoBoundaries files at once: a directory, a glob, or a list (one map per file,
+# each credited from its own licence); --regions skips other countries' files unread
+scripts/fetch-data.sh geoboundaries ALL ADM1 --simplified
+mapgen batch -i data/geoboundaries --dataset geoboundaries --context data/ne_10m_admin_0.geojson --credit --out-dir out/
+mapgen batch -i data/geoboundaries/*-ADM2.geojson --dataset geoboundaries --regions FRA,DEU --out-dir out/
+
 # Any GeoJSON or GeoPackage layer
 mapgen render -i my.geojson --id-column code --name-column label -o mine.svg
 ```
@@ -136,7 +142,6 @@ same licence). No dataset is vendored in this repository. See
 - [ ] Smarter label placement (pole of inaccessibility, leader lines). Today labels that collide or don't fit are dropped.
 - [ ] Insets for overseas territories (today they're reported and left out, or included with `--frame all`)
 - [ ] Optional `proj` backend for explicit EPSG codes
-- [ ] `mapgen batch` across many geoBoundaries files (today: one input file per run)
 
 ## Contributing
 

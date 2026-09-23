@@ -36,7 +36,8 @@ Licences seen in practice:
 | DEU ADM3 (BKG) | Data licence Germany – Attribution 2.0 | Attribution |
 | AUT ADM2 (BEV) | CC BY-SA 2.0 | Attribution + share-alike |
 
-`mapgen` embeds the credit in every SVG and warns on share-alike licences.
+`mapgen` embeds the credit in every SVG and warns on share-alike licences. `mapgen batch -i data/geoboundaries`
+renders every downloaded file, crediting each map from its own sidecar.
 Check the `.license.json` before publishing.
 
 ## Planned

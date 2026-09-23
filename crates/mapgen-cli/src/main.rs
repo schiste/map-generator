@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -42,11 +43,7 @@ enum Dataset {
 
 #[derive(clap::Args)]
 struct InputArgs {
-    /// Input file: GeoPackage (.gpkg) or GeoJSON (.geojson, .json).
-    #[arg(short, long)]
-    input: PathBuf,
-
-    /// Layout of the input file.
+    /// Layout of the input file(s).
     #[arg(long, value_enum, default_value = "custom")]
     dataset: Dataset,
 
@@ -113,18 +110,15 @@ impl InputArgs {
         q
     }
 
-    /// Credits for every input, and whether any licence is share-alike.
-    fn attribution(&self) -> (Option<String>, bool) {
+    /// Credits for a data file and the context layers, and whether any
+    /// licence is share-alike.
+    fn attribution(&self, data: &Path) -> (Option<String>, bool) {
         if let Some(a) = &self.attribution {
             return (Some(a.clone()), false);
         }
         let mut credits: Vec<String> = Vec::new();
         let mut share_alike = false;
-        let inputs = [
-            Some(&self.input),
-            self.context.as_ref(),
-            self.lakes.as_ref(),
-        ];
+        let inputs = [Some(data), self.context.as_deref(), self.lakes.as_deref()];
         for (i, path) in inputs.into_iter().enumerate() {
             let Some(path) = path else { continue };
             let credit = match read_license(path) {
@@ -286,8 +280,11 @@ enum OutputFormat {
 
 #[derive(clap::Args)]
 struct RenderArgs {
+    /// Input file: GeoPackage (.gpkg) or GeoJSON (.geojson, .json).
+    #[arg(short, long)]
+    input: PathBuf,
     #[command(flatten)]
-    input: InputArgs,
+    data: InputArgs,
     /// Region code to keep, compared against the filter column (e.g. `FRA`).
     #[arg(long)]
     region: Option<String>,
@@ -311,12 +308,19 @@ struct RenderArgs {
 
 #[derive(clap::Args)]
 struct BatchArgs {
+    /// Input files and/or directories (every .geojson, .json and .gpkg inside,
+    /// `.license.json` sidecars excepted). Shell globs work too.
+    #[arg(short, long, num_args = 1.., required = true)]
+    input: Vec<PathBuf>,
     #[command(flatten)]
-    input: InputArgs,
-    /// Directory to write one file per region into.
+    data: InputArgs,
+    /// Directory to write the maps into. With one input file, maps are named
+    /// `<region>.svg`; with several, `<file stem>.svg` (or `<file stem>-<region>.svg`
+    /// when a file holds several regions).
     #[arg(long)]
     out_dir: PathBuf,
-    /// Only these region codes (comma-separated); default: every value of the filter column.
+    /// Only these region codes (comma-separated); default: every value of the
+    /// filter column in every file.
     #[arg(long, value_delimiter = ',')]
     regions: Option<Vec<String>>,
     #[arg(long, value_enum, default_value = "svg")]
@@ -340,6 +344,7 @@ fn main() -> Result<()> {
 
 fn options(
     input: &InputArgs,
+    data: &Path,
     style: &StyleArgs,
     layout: &LayoutArgs,
     title: Option<String>,
@@ -356,7 +361,7 @@ fn options(
         padding: layout.padding,
         precision: layout.precision,
         title,
-        attribution: input.attribution().0,
+        attribution: input.attribution(data).0,
         credit: input.credit,
         theme: style.theme(),
         css_vars: style.css_vars || html,
@@ -397,7 +402,7 @@ fn is_html(format: OutputFormat, out: &Path) -> bool {
 }
 
 fn run_render(args: RenderArgs) -> Result<()> {
-    let mut query = args.input.query();
+    let mut query = args.data.query();
     let mut layout = args.layout;
     let region = if let Some(continent) = &args.continent {
         query.filter_column = Some("CONTINENT".into());
@@ -415,19 +420,26 @@ fn run_render(args: RenderArgs) -> Result<()> {
         bail!("--region needs a filter column: pass --filter-column or a --dataset preset");
     }
 
-    let subject = read_layer(&args.input.input, &query, region.as_deref())
-        .with_context(|| format!("reading {}", args.input.input.display()))?;
+    let subject = read_layer(&args.input, &query, region.as_deref())
+        .with_context(|| format!("reading {}", args.input.display()))?;
     if subject.is_empty() {
         bail!(
             "no features matched region {:?}",
             region.unwrap_or_default()
         );
     }
-    let (context, lakes) = args.input.load_context()?;
+    let (context, lakes) = args.data.load_context()?;
     let context = context_for(&context, &subject, region.as_deref());
 
     let html = is_html(args.format, &args.out);
-    let opts = options(&args.input, &args.style, &layout, args.title.clone(), html)?;
+    let opts = options(
+        &args.data,
+        &args.input,
+        &args.style,
+        &layout,
+        args.title.clone(),
+        html,
+    )?;
     let layers = MapLayers {
         subject,
         context,
@@ -450,7 +462,7 @@ fn run_render(args: RenderArgs) -> Result<()> {
         body.len(),
         rendered.projection,
     );
-    report_license(&args.input);
+    report_license(&args.data, &args.input);
     if !rendered.outside_frame.is_empty() {
         let names: Vec<&str> = rendered
             .outside_frame
@@ -479,77 +491,238 @@ fn to_html(svg: &str, out: &Path, title: Option<&str>, theme: &Theme) -> String 
     html_page(svg, title.unwrap_or(stem), theme, &format!("{stem}.svg"))
 }
 
-fn run_batch(args: BatchArgs) -> Result<()> {
-    let path = &args.input.input;
-    let query = args.input.query();
-    let regions = match &args.regions {
-        Some(r) => r.clone(),
-        None => list_regions(path, &query)
-            .with_context(|| format!("listing regions in {}", path.display()))?,
-    };
-    // GeoJSON has no index, so read it once; GeoPackages are queried per region.
-    let grouped = match Format::of(path)? {
-        Format::GeoJson => Some(read_grouped(path, &query)?),
-        Format::GeoPackage => None,
-    };
-    let (context, lakes) = args.input.load_context()?;
-    std::fs::create_dir_all(&args.out_dir)?;
-    let html = args.format == OutputFormat::Html;
-    let ext = if html { "html" } else { "svg" };
+/// Shared, read-only state for a batch run.
+struct Batch<'a> {
+    args: &'a BatchArgs,
+    query: LayerQuery,
+    context: Vec<MapFeature>,
+    lakes: Vec<MapFeature>,
+    wanted: Option<BTreeSet<String>>,
+    multi: bool,
+    html: bool,
+}
 
-    let results: Vec<(String, Result<usize>)> = regions
+type JobResult = (String, Result<()>);
+
+fn run_batch(args: BatchArgs) -> Result<()> {
+    let files = expand_inputs(&args.input)?;
+    if files.is_empty() {
+        bail!("no .geojson, .json or .gpkg files found in the given inputs");
+    }
+    let (context, lakes) = args.data.load_context()?;
+    std::fs::create_dir_all(&args.out_dir)?;
+    let batch = Batch {
+        query: args.data.query(),
+        context,
+        lakes,
+        wanted: args.regions.clone().map(|r| r.into_iter().collect()),
+        multi: files.len() > 1,
+        html: args.format == OutputFormat::Html,
+        args: &args,
+    };
+
+    // Parallel over files, and over regions within a file. Each file is read
+    // only by the job that renders it, so memory stays bounded.
+    let results: Vec<JobResult> = files
         .par_iter()
-        .map(|code| {
-            let job = || -> Result<usize> {
-                let subject = match &grouped {
-                    Some(g) => g.get(code).cloned().unwrap_or_default(),
-                    None => read_layer(path, &query, Some(code))?,
-                };
-                if subject.is_empty() {
-                    bail!("no features");
-                }
-                let layers = MapLayers {
-                    context: context_for(&context, &subject, Some(code)),
-                    lakes: lakes.clone(),
-                    subject,
-                };
-                let opts = options(
-                    &args.input,
-                    &args.style,
-                    &args.layout,
-                    Some(code.clone()),
-                    html,
-                )?;
-                let rendered = render(&layers, &opts)?;
-                let out = args.out_dir.join(format!("{}.{ext}", file_safe(code)));
-                let body = if html {
-                    to_html(&rendered.svg, &out, Some(code), &opts.theme)
-                } else {
-                    rendered.svg
-                };
-                std::fs::write(&out, &body)?;
-                Ok(body.len())
-            };
-            (code.clone(), job())
-        })
+        .filter(|f| batch.may_contain_wanted(f))
+        .map(|f| batch.file_jobs(f))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .flatten()
         .collect();
 
     let mut ok = 0;
-    for (code, r) in &results {
+    for (label, r) in &results {
         match r {
-            Ok(_) => ok += 1,
-            Err(e) => eprintln!("{code}: {e:#}"),
+            Ok(()) => ok += 1,
+            Err(e) => eprintln!("{label}: {e:#}"),
         }
     }
     eprintln!(
-        "rendered {ok}/{} maps into {}",
+        "rendered {ok}/{} maps from {} file(s) into {}",
         results.len(),
+        files.len(),
         args.out_dir.display()
     );
-    if ok == 0 && !results.is_empty() {
+    let share_alike: Vec<String> = files
+        .iter()
+        .filter(|f| batch.may_contain_wanted(f))
+        .filter(|f| read_license(f).is_some_and(|l| l.share_alike()))
+        .map(|f| stem(f))
+        .collect();
+    if !share_alike.is_empty() {
+        eprintln!(
+            "note: share-alike data licence for {}; maps made from them must be shared under the same licence",
+            share_alike.join(", ")
+        );
+    }
+    if results.is_empty() {
+        bail!("no regions matched");
+    }
+    if ok == 0 {
         bail!("every map failed");
     }
     Ok(())
+}
+
+impl Batch<'_> {
+    /// geoBoundaries files are named `<ISO3>-<LEVEL>`, so `--regions` can skip
+    /// files without reading them.
+    fn may_contain_wanted(&self, file: &Path) -> bool {
+        match (&self.wanted, self.args.data.dataset) {
+            (Some(w), Dataset::Geoboundaries) => {
+                let s = stem(file);
+                let iso = s.split('-').next().unwrap_or(&s);
+                w.contains(iso)
+            }
+            _ => true,
+        }
+    }
+
+    fn file_jobs(&self, file: &Path) -> Vec<JobResult> {
+        let fail = |e: anyhow::Error| vec![(file.display().to_string(), Err(e))];
+        let keep = |code: &String| self.wanted.as_ref().is_none_or(|w| w.contains(code));
+        let file_stem = stem(file);
+
+        if self.query.filter_column.is_none() {
+            // No region column: the whole file is one map.
+            let job = || -> Result<()> {
+                let subject = read_layer(file, &self.query, None)?;
+                self.render_to(file, None, subject, &file_stem)
+            };
+            return vec![(file_stem.clone(), job())];
+        }
+
+        let format = match Format::of(file) {
+            Ok(f) => f,
+            Err(e) => return fail(e.into()),
+        };
+        match format {
+            Format::GeoJson => {
+                let groups = match read_grouped(file, &self.query) {
+                    Ok(g) => g,
+                    Err(e) => return fail(anyhow::Error::from(e).context("reading file")),
+                };
+                let groups: Vec<(String, Vec<MapFeature>)> =
+                    groups.into_iter().filter(|(c, _)| keep(c)).collect();
+                let single = groups.len() == 1;
+                groups
+                    .into_par_iter()
+                    .map(|(code, subject)| {
+                        let out = self.out_stem(&file_stem, &code, single);
+                        let r = self.render_to(file, Some(&code), subject, &out);
+                        (out, r)
+                    })
+                    .collect()
+            }
+            Format::GeoPackage => {
+                let regions = match list_regions(file, &self.query) {
+                    Ok(r) => r,
+                    Err(e) => return fail(anyhow::Error::from(e).context("listing regions")),
+                };
+                let regions: Vec<String> = regions.into_iter().filter(|c| keep(c)).collect();
+                let single = regions.len() == 1;
+                regions
+                    .par_iter()
+                    .map(|code| {
+                        let out = self.out_stem(&file_stem, code, single);
+                        let r = read_layer(file, &self.query, Some(code))
+                            .map_err(anyhow::Error::from)
+                            .and_then(|subject| self.render_to(file, Some(code), subject, &out));
+                        (out, r)
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    fn out_stem(&self, file_stem: &str, code: &str, single_region: bool) -> String {
+        match (self.multi, single_region) {
+            (false, _) => file_safe(code),
+            (true, true) => file_safe(file_stem),
+            (true, false) => file_safe(&format!("{file_stem}-{code}")),
+        }
+    }
+
+    fn render_to(
+        &self,
+        file: &Path,
+        code: Option<&str>,
+        subject: Vec<MapFeature>,
+        out_stem: &str,
+    ) -> Result<()> {
+        if subject.is_empty() {
+            bail!("no features");
+        }
+        let args = self.args;
+        let layers = MapLayers {
+            context: context_for(&self.context, &subject, code),
+            lakes: self.lakes.clone(),
+            subject,
+        };
+        let opts = options(
+            &args.data,
+            file,
+            &args.style,
+            &args.layout,
+            Some(out_stem.to_owned()),
+            self.html,
+        )?;
+        let rendered = render(&layers, &opts)?;
+        let ext = if self.html { "html" } else { "svg" };
+        let out = args.out_dir.join(format!("{out_stem}.{ext}"));
+        let body = if self.html {
+            to_html(&rendered.svg, &out, Some(out_stem), &opts.theme)
+        } else {
+            rendered.svg
+        };
+        std::fs::write(&out, body).with_context(|| format!("writing {}", out.display()))?;
+        Ok(())
+    }
+}
+
+/// Expands directories into their data files, drops licence sidecars, sorts,
+/// and rejects duplicate file stems (they would overwrite each other's maps).
+fn expand_inputs(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let is_sidecar = |p: &Path| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(".license.json"))
+    };
+    let mut files = BTreeSet::new();
+    for p in paths {
+        if p.is_dir() {
+            for entry in std::fs::read_dir(p).with_context(|| format!("reading {}", p.display()))? {
+                let path = entry?.path();
+                if path.is_file() && !is_sidecar(&path) && Format::of(&path).is_ok() {
+                    files.insert(path);
+                }
+            }
+        } else if !is_sidecar(p) {
+            files.insert(p.clone());
+        }
+    }
+    let files: Vec<PathBuf> = files.into_iter().collect();
+    if files.len() > 1 {
+        let mut seen = BTreeSet::new();
+        for f in &files {
+            if !seen.insert(stem(f)) {
+                bail!(
+                    "two inputs share the file name {:?}; maps would overwrite each other",
+                    stem(f)
+                );
+            }
+        }
+    }
+    Ok(files)
+}
+
+fn stem(p: &Path) -> String {
+    p.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("map")
+        .to_owned()
 }
 
 /// Licence metadata written by `scripts/fetch-data.sh` next to a data file.
@@ -583,8 +756,8 @@ fn read_license(data: &Path) -> Option<LicenseFile> {
     serde_json::from_str(&text).ok()
 }
 
-fn report_license(input: &InputArgs) {
-    let (attribution, share_alike) = input.attribution();
+fn report_license(input: &InputArgs, data: &Path) {
+    let (attribution, share_alike) = input.attribution(data);
     if let Some(a) = attribution {
         eprintln!("attribution: {a}");
     }
@@ -640,6 +813,29 @@ mod tests {
         assert!(license("Open Database License (ODbL) v1.0").share_alike());
         assert!(!license("Public Domain").share_alike());
         assert!(!license("Etalab Open License 2.0").share_alike());
+    }
+
+    #[test]
+    fn expands_directories_and_skips_sidecars() {
+        let dir = std::env::temp_dir().join(format!("mapgen-cli-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        for f in [
+            "FRA-ADM1.geojson",
+            "FRA-ADM1.license.json",
+            "notes.txt",
+            "sub/X.gpkg",
+        ] {
+            std::fs::write(dir.join(f), "").unwrap();
+        }
+        let files = expand_inputs(&[dir.clone(), dir.join("sub/X.gpkg")]).unwrap();
+        let names: Vec<String> = files.iter().map(|f| stem(f)).collect();
+        assert_eq!(names, ["FRA-ADM1", "X"]);
+
+        std::fs::write(dir.join("sub/FRA-ADM1.geojson"), "").unwrap();
+        let dup = expand_inputs(&[dir.clone(), dir.join("sub/FRA-ADM1.geojson")]);
+        assert!(dup.is_err(), "duplicate stems must be rejected");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
