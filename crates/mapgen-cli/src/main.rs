@@ -649,26 +649,41 @@ fn run_render(args: RenderArgs) -> Result<()> {
     }
     report_license(&args.data, &args.input);
     if !rendered.outside_frame.is_empty() {
-        let names: Vec<&str> = rendered
-            .outside_frame
-            .iter()
-            .map(|id| {
-                layers
-                    .subject
-                    .iter()
-                    .find(|f| &f.id == id)
-                    .map_or(id.as_str(), |f| f.name.as_str())
-            })
-            .collect();
-        let shown = names.iter().take(8).copied().collect::<Vec<_>>().join(", ");
-        let more = names.len().saturating_sub(8);
         eprintln!(
-            "note: {} region(s) outside the frame were left out: {shown}{} (use --frame all, or more --max-insets)",
-            names.len(),
-            if more > 0 { format!(" and {more} more") } else { String::new() },
+            "{}",
+            left_out_warning(&rendered.outside_frame, &layers.subject)
         );
     }
     Ok(())
+}
+
+/// Warning for regions with no shape on the map (outside the frame and not in
+/// an inset), naming each with its code so data rows for it can be found.
+fn left_out_warning(ids: &[String], subject: &[MapFeature]) -> String {
+    let named: Vec<String> = ids
+        .iter()
+        .map(|id| match subject.iter().find(|f| &f.id == id) {
+            Some(f) if f.name != *id => format!("{} ({id})", f.name),
+            _ => id.clone(),
+        })
+        .collect();
+    let shown = named
+        .iter()
+        .take(10)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    let more = named.len().saturating_sub(10);
+    format!(
+        "warning: {} region(s) have no shape on the map (outside the frame, no inset): {shown}{}; \
+         data for them will not show (use --frame all or raise --max-insets)",
+        named.len(),
+        if more > 0 {
+            format!(" and {more} more")
+        } else {
+            String::new()
+        },
+    )
 }
 
 fn to_html(svg: &str, out: &Path, title: Option<&str>, theme: &Theme) -> String {
@@ -888,7 +903,7 @@ impl Batch<'_> {
         std::fs::write(&out, body).with_context(|| format!("writing {}", out.display()))?;
         if !rendered.outside_frame.is_empty() {
             notes.push(format!(
-                "{} region(s) left out",
+                "warning: {} region(s) have no shape on the map",
                 rendered.outside_frame.len()
             ));
         }
@@ -1373,6 +1388,21 @@ mod tests {
         assert!(read_license(&data).is_none());
         assert!(read_license(&dir.join("missing.geojson")).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn left_out_warning_names_regions_with_their_codes() {
+        let f = |id: &str, name: &str| MapFeature {
+            id: id.into(),
+            name: name.into(),
+            class: String::new(),
+            parent: None,
+            geometry: geo_types::MultiPolygon(vec![]),
+        };
+        let subject = [f("US-66010", "Guam"), f("h123", "h123")];
+        let w = left_out_warning(&["US-66010".into(), "h123".into()], &subject);
+        assert!(w.starts_with("warning: 2 region(s)"), "{w}");
+        assert!(w.contains("Guam (US-66010), h123"), "{w}");
     }
 
     #[test]
