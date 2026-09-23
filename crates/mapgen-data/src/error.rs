@@ -14,6 +14,8 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    #[error("table: {0}")]
+    Table(String),
     #[error("invalid SQL identifier {0:?}")]
     InvalidIdentifier(String),
     #[error("table {0:?} is not registered in gpkg_geometry_columns")]

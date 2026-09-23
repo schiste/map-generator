@@ -141,6 +141,89 @@ pub fn crosswalk(
         .collect()
 }
 
+/// What a table lookup changed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LookupStats {
+    pub matched: usize,
+    pub unmatched: Vec<String>,
+    /// Keys that map to more than one value in the table (left unassigned).
+    pub ambiguous: Vec<String>,
+}
+
+/// Sets `code` (and `parent`, if `parent_column` is given) on each record
+/// whose `match_property` equals a key of the table. The issue's "crosswalk
+/// CSV" for sources without standard codes.
+pub fn apply_code_table(
+    records: &mut [crate::geojson::Record],
+    match_property: &str,
+    table: &crate::table::Table,
+    key_column: &str,
+    code_column: &str,
+    parent_column: Option<&str>,
+) -> Result<LookupStats> {
+    let (codes, ambiguous) = table.lookup(key_column, code_column)?;
+    let parents = match parent_column {
+        Some(p) => table.lookup(key_column, p)?.0,
+        None => BTreeMap::new(),
+    };
+    let mut stats = LookupStats {
+        ambiguous,
+        ..LookupStats::default()
+    };
+    for (i, r) in records.iter_mut().enumerate() {
+        let key = r.prop(match_property);
+        match key.as_ref().and_then(|k| codes.get(k)) {
+            Some(code) => {
+                stats.matched += 1;
+                r.properties.insert("code".into(), code.clone().into());
+                if let Some(p) = key.as_ref().and_then(|k| parents.get(k)) {
+                    r.properties.insert("parent".into(), p.clone().into());
+                }
+            }
+            None => stats.unmatched.push(key.unwrap_or_else(|| format!("#{i}"))),
+        }
+    }
+    Ok(stats)
+}
+
+/// Sets `parent_name` on each record whose `parent` equals a key of the
+/// table, optionally with `prefix` in front (`US-` + `31` = `US-31`).
+pub fn apply_parent_names(
+    records: &mut [crate::geojson::Record],
+    table: &crate::table::Table,
+    key_column: &str,
+    name_column: &str,
+    prefix: &str,
+) -> Result<LookupStats> {
+    let (names, ambiguous) = table.lookup(key_column, name_column)?;
+    let by_parent: BTreeMap<String, &String> = names
+        .iter()
+        .flat_map(|(k, v)| [(k.clone(), v), (format!("{prefix}{k}"), v)])
+        .collect();
+    let mut stats = LookupStats {
+        ambiguous,
+        ..LookupStats::default()
+    };
+    for r in records.iter_mut() {
+        let Some(parent) = r.prop("parent") else {
+            continue;
+        };
+        match by_parent.get(&parent) {
+            Some(name) => {
+                stats.matched += 1;
+                r.properties
+                    .insert("parent_name".into(), (*name).clone().into());
+            }
+            None => {
+                if !stats.unmatched.contains(&parent) {
+                    stats.unmatched.push(parent);
+                }
+            }
+        }
+    }
+    Ok(stats)
+}
+
 /// Reference presets for common crosswalks.
 pub fn natural_earth_admin1_iso() -> ReferenceSpec {
     let q: LayerQuery = Source::NaturalEarthAdmin1.layer_query();
@@ -196,6 +279,56 @@ mod tests {
             reference("d", sq(1.0, 1.0, 1.0)),
         ];
         assert_eq!(crosswalk(&[sq(0.0, 0.0, 2.0)], &refs, 0.5), vec![None]);
+    }
+
+    fn record(props: &[(&str, &str)]) -> crate::geojson::Record {
+        crate::geojson::Record {
+            feature_id: None,
+            properties: props
+                .iter()
+                .map(|(k, v)| (k.to_string(), (*v).into()))
+                .collect(),
+            geometry: geo_types::Geometry::MultiPolygon(MultiPolygon(vec![])),
+        }
+    }
+
+    #[test]
+    fn code_tables_assign_codes_and_skip_ambiguous_keys() {
+        let table = crate::table::parse_table(
+            "name,fips,state\nAda,16001,16\nLancaster,31109,31\nLancaster,42071,42\n",
+        )
+        .unwrap();
+        let mut recs = vec![
+            record(&[("shapeName", "Ada")]),
+            record(&[("shapeName", "Lancaster")]),
+        ];
+        let s = apply_code_table(
+            &mut recs,
+            "shapeName",
+            &table,
+            "name",
+            "fips",
+            Some("state"),
+        )
+        .unwrap();
+        assert_eq!(s.matched, 1);
+        assert_eq!(s.ambiguous, ["Lancaster"]);
+        assert_eq!(recs[0].prop("code").as_deref(), Some("16001"));
+        assert_eq!(recs[0].prop("parent").as_deref(), Some("16"));
+        assert_eq!(recs[1].prop("code"), None);
+    }
+
+    #[test]
+    fn parent_names_match_prefixed_codes() {
+        let table = crate::table::parse_table("STATE|STATE_NAME\n31|Nebraska\n").unwrap();
+        let mut recs = vec![
+            record(&[("parent", "US-31")]),
+            record(&[("parent", "US-99")]),
+        ];
+        let s = apply_parent_names(&mut recs, &table, "STATE", "STATE_NAME", "US-").unwrap();
+        assert_eq!(s.matched, 1);
+        assert_eq!(s.unmatched, ["US-99"]);
+        assert_eq!(recs[0].prop("parent_name").as_deref(), Some("Nebraska"));
     }
 
     #[test]

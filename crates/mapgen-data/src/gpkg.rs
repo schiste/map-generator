@@ -46,9 +46,15 @@ pub fn read_features_in(
         select.push(ident(c)?);
     }
     select.push(ident(&query.name_column)?);
-    match query.parent_column.as_deref().filter(|c| has(c)) {
-        Some(c) => select.push(ident(c)?),
-        None => select.push("NULL".into()),
+    for optional in [
+        &query.parent_column,
+        &query.parent_name_column,
+        &query.country_column,
+    ] {
+        match optional.as_deref().filter(|c| has(c)) {
+            Some(c) => select.push(ident(c)?),
+            None => select.push("NULL".into()),
+        }
     }
     select.push(ident(&geom_col)?);
 
@@ -83,7 +89,7 @@ pub fn read_features_in(
     let n = id_cols.len();
     let mut features = Vec::new();
     while let Some(row) = rows.next()? {
-        let Some(blob) = row.get::<_, Option<Vec<u8>>>(n + 2)? else {
+        let Some(blob) = row.get::<_, Option<Vec<u8>>>(n + 4)? else {
             continue;
         };
         let ids = (0..n).map(|i| row.get::<_, Value>(i).map(value_to_string));
@@ -96,6 +102,11 @@ pub fn read_features_in(
         }
         let name = meaningful(value_to_string(row.get(n)?));
         let parent = meaningful(value_to_string(row.get(n + 1)?));
+        let parent_name = parent
+            .as_ref()
+            .and(meaningful(value_to_string(row.get(n + 2)?)));
+        let country = meaningful(value_to_string(row.get(n + 3)?))
+            .and_then(|c| crate::iso::country_alpha2(&c));
         let Some(id) = id.or_else(|| name.clone()) else {
             continue;
         };
@@ -105,6 +116,8 @@ pub fn read_features_in(
             id,
             class: query.class.clone(),
             parent,
+            parent_name,
+            country,
             geometry,
         });
     }

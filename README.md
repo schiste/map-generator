@@ -17,11 +17,17 @@ cargo build --release
     -o france.svg
 ```
 
-Each region is its own selectable element:
+Each region is its own selectable element, carrying its code, its parent and its country:
 
 ```xml
-<path id="FR-75" class="mg-land subdivision" data-name="Paris" d="M…Z"><title>Paris</title></path>
+<path id="FR-75" class="mg-land subdivision fr" data-name="Paris" data-code="FR-75"
+      data-parent="FR-IDF" d="M…Z"><title>Paris, Île-de-France</title></path>
 ```
+
+`data-code` is the region's code as given by the data (the `id` is made XML-safe and unique),
+`data-parent` the enclosing unit's code, and the lowercase ISO 3166-1 alpha-2 class
+(`fr`, `us`…) lets colouring tools such as [Maphue](https://github.com/schiste/map-coloring)
+colour the map by country, neighbours included.
 
 ## Features
 
@@ -92,6 +98,10 @@ scripts/fetch-data.sh geoboundaries USA ADM2 && scripts/fetch-data.sh us-countie
 mapgen convert -i data/geoboundaries/USA-ADM2.geojson --dataset geoboundaries -o usa-counties.gpkg \
     --ids-from data/us-counties-fips.geojson --ids-column id --ids-parent-column STATE --ids-prefix US-
 mapgen render -i usa-counties.gpkg --dataset geoboundaries --credit -o usa.svg   # US-06037, …
+# …plus state names in tooltips ("Lancaster, Nebraska"): add to convert
+#   --parent-names data/us-states.txt --parent-names-key STATE --parent-names-column STATE_NAME
+# Sources without codes: assign them from a table (CSV, TSV or pipe-separated)
+#   --codes-from codes.csv --codes-key name --codes-column fips [--codes-parent-column state]
 
 # Projections
 mapgen render … --projection albers --parallels 29.5,45.5

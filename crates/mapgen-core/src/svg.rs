@@ -273,16 +273,41 @@ fn write_layer(
     let _ = writeln!(out, "<g {group}>");
     for (f, d) in paths {
         let id = unique_id(ids, &format!("{id_prefix}{}", f.id));
-        let _ = writeln!(
-            out,
-            "<path id=\"{}\" class=\"{layer_class} {}\" data-name=\"{}\" d=\"{d}\"><title>{}</title></path>",
-            escape(&id),
-            escape(&f.class),
-            escape(&f.name),
-            escape(&f.name),
-        );
+        let _ = writeln!(out, "{}", path_element(&id, layer_class, f, &d));
     }
     out.push_str("</g>\n");
+}
+
+/// A region's `<path>`: `id` (XML-safe, unique), classes (layer, feature
+/// class and lowercase ISO-2 country, which Maphue uses to colour by
+/// country), `data-name`, `data-code` (the raw code, since `id` may have been
+/// sanitised or de-duplicated), `data-parent`, and a `<title>` tooltip that
+/// names the parent ("Lancaster, Nebraska").
+fn path_element(id: &str, layer_class: &str, f: &MapFeature, d: &str) -> String {
+    let mut classes = vec![layer_class];
+    if !f.class.is_empty() {
+        classes.push(&f.class);
+    }
+    if let Some(c) = f.country.as_deref().filter(|c| *c != f.class) {
+        classes.push(c);
+    }
+    let parent = f
+        .parent
+        .as_deref()
+        .map(|p| format!(" data-parent=\"{}\"", escape(p)))
+        .unwrap_or_default();
+    let title = match &f.parent_name {
+        Some(p) if *p != f.name => format!("{}, {p}", f.name),
+        _ => f.name.clone(),
+    };
+    format!(
+        "<path id=\"{}\" class=\"{}\" data-name=\"{}\" data-code=\"{}\"{parent} d=\"{d}\"><title>{}</title></path>",
+        escape(id),
+        escape(&classes.join(" ")),
+        escape(&f.name),
+        escape(&f.id),
+        escape(&title),
+    )
 }
 
 /// One `<path>` per border kind, each border segment drawn once.
@@ -523,6 +548,65 @@ mod tests {
         assert_eq!(unique_id(&mut used, "FR-75"), "FR-75-2");
         assert_eq!(unique_id(&mut used, "1159106863"), "id-1159106863");
         assert_eq!(unique_id(&mut used, "a b\"c"), "a_b_c");
+    }
+
+    fn lancaster() -> MapFeature {
+        MapFeature {
+            id: "US-31109".into(),
+            name: "Lancaster".into(),
+            class: "subdivision".into(),
+            parent: Some("US-31".into()),
+            parent_name: Some("Nebraska".into()),
+            country: Some("us".into()),
+            ..MapFeature::default()
+        }
+    }
+
+    #[test]
+    fn paths_carry_codes_parent_and_country() {
+        let p = path_element("US-31109", "mg-land", &lancaster(), "M0 0Z");
+        assert_eq!(
+            p,
+            "<path id=\"US-31109\" class=\"mg-land subdivision us\" data-name=\"Lancaster\" \
+             data-code=\"US-31109\" data-parent=\"US-31\" d=\"M0 0Z\"><title>Lancaster, Nebraska</title></path>"
+        );
+        let bare = MapFeature {
+            id: "x".into(),
+            name: "X".into(),
+            ..MapFeature::default()
+        };
+        assert_eq!(
+            path_element("id-x", "mg-land", &bare, "M0 0Z"),
+            "<path id=\"id-x\" class=\"mg-land\" data-name=\"X\" data-code=\"x\" d=\"M0 0Z\"><title>X</title></path>"
+        );
+    }
+
+    /// Maphue finds a country's shapes with
+    /// `[class~="fr"], [id="fr"], [id="FR"]`; the ISO-2 class must be a
+    /// whitespace-separated token of `class`.
+    #[test]
+    fn maphue_finds_country_shapes() {
+        let p = path_element(
+            "FR-75",
+            "mg-land",
+            &MapFeature {
+                id: "FR-75".into(),
+                name: "Paris".into(),
+                class: "subdivision".into(),
+                country: Some("fr".into()),
+                ..MapFeature::default()
+            },
+            "M0 0Z",
+        );
+        let class = p
+            .split("class=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        assert!(class.split_whitespace().any(|t| t == "fr"), "{class}");
+        assert!(!class.split_whitespace().any(|t| t == "FR-75"));
     }
 
     #[test]

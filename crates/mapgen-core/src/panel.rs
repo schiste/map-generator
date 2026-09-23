@@ -597,7 +597,7 @@ mod tests {
             name: id.into(),
             class: "x".into(),
             parent: parent.map(Into::into),
-            geometry: MultiPolygon(vec![]),
+            ..MapFeature::default()
         };
         let subject = vec![
             f("a", Some("P")),

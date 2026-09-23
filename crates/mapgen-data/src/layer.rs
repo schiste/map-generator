@@ -8,7 +8,7 @@ use crate::geojson;
 
 /// What to read from a layer. Column names double as GeoJSON property names
 /// (matched case-insensitively).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LayerQuery {
     /// GeoPackage table; ignored for GeoJSON.
     pub table: Option<String>,
@@ -20,6 +20,10 @@ pub struct LayerQuery {
     pub filter_column: Option<String>,
     /// Column holding the code of the enclosing unit (see `MapFeature::parent`).
     pub parent_column: Option<String>,
+    /// Column holding the enclosing unit's name (used only with a parent code).
+    pub parent_name_column: Option<String>,
+    /// Column holding the country, as ISO 3166-1 alpha-2 or alpha-3.
+    pub country_column: Option<String>,
     /// CSS class emitted on each path.
     pub class: String,
 }
@@ -47,8 +51,8 @@ impl Source {
                 id_columns: ids.iter().map(|s| s.to_string()).collect(),
                 name_column: name.into(),
                 filter_column: filter.map(Into::into),
-                parent_column: None,
                 class: class.into(),
+                ..LayerQuery::default()
             }
         };
         match *self {
@@ -57,6 +61,8 @@ impl Source {
             Source::GeoBoundaries => LayerQuery {
                 table: None,
                 parent_column: Some("parent".into()),
+                parent_name_column: Some("parent_name".into()),
+                country_column: Some("shapeGroup".into()),
                 ..q(
                     String::new(),
                     &["code", "shapeISO", "shapeID"],
@@ -65,16 +71,22 @@ impl Source {
                     "subdivision",
                 )
             },
-            Source::NaturalEarthAdmin0 => q(
-                "ne_10m_admin_0_countries".into(),
-                &["ADM0_A3"],
-                "NAME",
-                Some("ADM0_A3"),
-                "country",
-            ),
+            // `ISO_A2_EH` fills in France's and Norway's codes, which `ISO_A2` lacks.
+            Source::NaturalEarthAdmin0 => LayerQuery {
+                country_column: Some("ISO_A2_EH".into()),
+                ..q(
+                    "ne_10m_admin_0_countries".into(),
+                    &["ADM0_A3"],
+                    "NAME",
+                    Some("ADM0_A3"),
+                    "country",
+                )
+            },
             // `region_cod` groups e.g. French départements into régions.
             Source::NaturalEarthAdmin1 => LayerQuery {
                 parent_column: Some("region_cod".into()),
+                parent_name_column: Some("region".into()),
+                country_column: Some("iso_a2".into()),
                 ..q(
                     "ne_10m_admin_1_states_provinces".into(),
                     &["iso_3166_2", "adm1_code"],

@@ -57,6 +57,11 @@ pub struct LayerSpec {
     /// Property with the code of the enclosing unit; borders between
     /// different parents are drawn thicker.
     pub parent_property: Option<String>,
+    /// Property with the enclosing unit's name, for tooltips.
+    pub parent_name_property: Option<String>,
+    /// Property with the country (ISO 3166-1 alpha-2 or alpha-3), emitted as
+    /// a lowercase alpha-2 class for colouring tools like Maphue.
+    pub country_property: Option<String>,
     /// Data credit for this layer. Natural Earth presets default to
     /// "Natural Earth"; for geoBoundaries, pass the source and licence.
     pub attribution: Option<String>,
@@ -76,9 +81,8 @@ impl LayerSpec {
                 table: None,
                 id_columns: vec!["id".into()],
                 name_column: "name".into(),
-                filter_column: None,
-                parent_column: None,
                 class: "region".into(),
+                ..LayerQuery::default()
             },
             Dataset::NeAdmin0 => Source::NaturalEarthAdmin0.layer_query(),
             Dataset::NeAdmin1 => Source::NaturalEarthAdmin1.layer_query(),
@@ -97,6 +101,12 @@ impl LayerSpec {
         }
         if let Some(p) = &self.parent_property {
             q.parent_column = Some(p.clone());
+        }
+        if let Some(p) = &self.parent_name_property {
+            q.parent_name_column = Some(p.clone());
+        }
+        if let Some(p) = &self.country_property {
+            q.country_column = Some(p.clone());
         }
         q
     }

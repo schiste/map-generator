@@ -57,6 +57,10 @@ mapgen convert -i data/geoboundaries/USA-ADM2.geojson --dataset geoboundaries -o
   --ids-from data/us-counties-fips.geojson --ids-column id --ids-parent-column STATE --ids-prefix US-
 ```
 
+The same command also fetches the Census list of state codes and names
+(`data/us-states.txt`, public domain) for `--parent-names`, which puts the state in each
+county's tooltip ("Lancaster, Nebraska").
+
 Natural Earth Admin-1 works the same way for ISO 3166-2 codes (`--ids-column iso_3166_2`,
 or `region_cod` to get e.g. French régions).
 

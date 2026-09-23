@@ -35,6 +35,10 @@ export interface LayerSpec {
   filterProperty?: string;
   /** Property with the enclosing unit's code; borders between different parents are drawn thicker. */
   parentProperty?: string;
+  /** Property with the enclosing unit's name, for tooltips ("Lancaster, Nebraska"). */
+  parentNameProperty?: string;
+  /** Property with the country (ISO alpha-2 or alpha-3), emitted as a lowercase alpha-2 class (Maphue). */
+  countryProperty?: string;
   /** Data credit for this layer (Natural Earth presets default to "Natural Earth"). */
   attribution?: string;
 }

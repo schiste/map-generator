@@ -12,7 +12,9 @@ mod geometry;
 pub mod gpkg;
 #[cfg(feature = "gpkg")]
 pub mod gpkg_write;
+pub mod iso;
 mod layer;
+pub mod table;
 
 pub use error::{Error, Result};
 pub use layer::{

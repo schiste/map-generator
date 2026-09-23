@@ -11,6 +11,7 @@ gen.setLakes("{}", { dataset: "ne-lakes" });
 gen.setDisputed("{}", { dataset: "ne-disputed" });
 gen.setDisputed();
 gen.setSubject("{}", { dataset: "geoboundaries", parentProperty: "parent" });
+gen.setSubject("{}", { parentNameProperty: "state", countryProperty: "iso3" });
 
 const out: MapOutput = gen.render();
 const svg: string = out.svg;

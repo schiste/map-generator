@@ -42,7 +42,8 @@ $M convert -i "$G/FRA-ADM1.geojson" --dataset geoboundaries -o "$T/FRA-ADM1.gpkg
 $M render -i "$T/FRA-ADM1.gpkg" --dataset geoboundaries "${CTX[@]}" --labels --credit \
   --width 900 --title "France — régions" -o "$E/france-regions.svg"
 $M convert -i "$G/USA-ADM2.geojson" --dataset geoboundaries -o "$T/USA-ADM2.gpkg" \
-  --ids-from "$D/us-counties-fips.geojson" --ids-column id --ids-parent-column STATE --ids-prefix US-
+  --ids-from "$D/us-counties-fips.geojson" --ids-column id --ids-parent-column STATE --ids-prefix US- \
+  --parent-names "$D/us-states.txt" --parent-names-key STATE --parent-names-column STATE_NAME
 # Albers conic, state borders from the FIPS parents, Alaska/Hawaii/Puerto Rico in insets.
 $M render -i "$T/USA-ADM2.gpkg" --dataset geoboundaries "${CTX[@]}" --credit --theme light \
   --simplify 1 --width 1200 --title "United States — counties" -o "$E/usa-counties.svg"

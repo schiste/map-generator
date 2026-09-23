@@ -100,6 +100,8 @@ PY
     # (public-domain Census data, as packaged by plotly/datasets, MIT), pinned.
     fetch "https://raw.githubusercontent.com/plotly/datasets/0c447c47b757ad74edecab31f0d72f849d2e67c2/geojson-counties-fips.json" \
       "$DATA_DIR/us-counties-fips.geojson"
+    # State FIPS codes and names (Census Bureau, public domain), for tooltips.
+    fetch "https://www2.census.gov/geo/docs/reference/state.txt" "$DATA_DIR/us-states.txt"
     ;;
   *)
     echo "usage: $0 {ne-geojson|natural-earth|geoboundaries ISO3 LEVEL|us-counties-fips}" >&2

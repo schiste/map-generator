@@ -66,8 +66,8 @@ fn reads_filtered_region_with_iso_ids() {
         id_columns: vec!["iso".into(), "uid".into()],
         name_column: "name".into(),
         filter_column: Some("country".into()),
-        parent_column: None,
         class: "subdivision".into(),
+        ..LayerQuery::default()
     };
 
     let fr = read_layer(&path, &q, Some("FRA")).unwrap();
@@ -165,9 +165,8 @@ mod writer {
             table: None,
             id_columns: vec!["shapeID".into()],
             name_column: "shapeName".into(),
-            filter_column: None,
-            parent_column: None,
             class: "x".into(),
+            ..LayerQuery::default()
         };
         assert_eq!(read_layer(&path, &q, None).unwrap().len(), 2);
         let _ = std::fs::remove_file(&path);

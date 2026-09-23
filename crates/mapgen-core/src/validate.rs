@@ -490,8 +490,8 @@ mod tests {
             id: id.into(),
             name: id.into(),
             class: "x".into(),
-            parent: None,
             geometry: MultiPolygon(vec![p]),
+            ..MapFeature::default()
         }
     }
 

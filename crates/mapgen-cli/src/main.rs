@@ -9,9 +9,12 @@ use mapgen_core::{
     html_page, render, Color, FrameMode, GeoBBox, InsetMode, MapFeature, MapLayers, MapLine,
     ProjectionChoice, RenderOptions, Theme,
 };
-use mapgen_data::crosswalk::{crosswalk, load_reference, ReferenceSpec};
+use mapgen_data::crosswalk::{
+    apply_code_table, apply_parent_names, crosswalk, load_reference, ReferenceSpec,
+};
 use mapgen_data::geojson::{read_lines, read_records};
 use mapgen_data::gpkg_write::{write_gpkg, WriteOptions};
+use mapgen_data::table::read_table;
 use mapgen_data::{
     list_regions, read_grouped, read_layer, read_layer_in, Format, LayerQuery, Source,
 };
@@ -80,6 +83,16 @@ struct InputArgs {
     #[arg(long)]
     parent_column: Option<String>,
 
+    /// Column/property with the enclosing unit's name, for tooltips
+    /// ("Lancaster, Nebraska").
+    #[arg(long)]
+    parent_name_column: Option<String>,
+
+    /// Column/property with the country (ISO 3166-1 alpha-2 or alpha-3),
+    /// emitted as a lowercase alpha-2 class for colouring tools like Maphue.
+    #[arg(long)]
+    country_column: Option<String>,
+
     /// Neighbouring countries for context: Natural Earth Admin-0 (.gpkg or .geojson).
     #[arg(long)]
     context: Option<PathBuf>,
@@ -110,9 +123,8 @@ impl InputArgs {
                 table: None,
                 id_columns: vec!["id".into()],
                 name_column: "name".into(),
-                filter_column: None,
-                parent_column: None,
                 class: "region".into(),
+                ..LayerQuery::default()
             },
             Dataset::Geoboundaries => Source::GeoBoundaries.layer_query(),
             Dataset::NeAdmin0 => Source::NaturalEarthAdmin0.layer_query(),
@@ -132,6 +144,12 @@ impl InputArgs {
         }
         if let Some(c) = &self.parent_column {
             q.parent_column = Some(c.clone());
+        }
+        if let Some(c) = &self.parent_name_column {
+            q.parent_name_column = Some(c.clone());
+        }
+        if let Some(c) = &self.country_column {
+            q.country_column = Some(c.clone());
         }
         q
     }
@@ -987,6 +1005,30 @@ struct ConvertArgs {
     /// of the other to be considered the same place.
     #[arg(long, default_value_t = 0.5, requires = "ids_from")]
     ids_min_share: f64,
+    /// Table (CSV, TSV or pipe-separated) assigning codes by matching a
+    /// property, for sources without standard codes: e.g. a name → FIPS list.
+    #[arg(long, requires_all = ["codes_key", "codes_column"])]
+    codes_from: Option<PathBuf>,
+    /// Column of the --codes-from table matched against --codes-match.
+    #[arg(long, requires = "codes_from")]
+    codes_key: Option<String>,
+    /// Column of the --codes-from table holding the code.
+    #[arg(long, requires = "codes_from")]
+    codes_column: Option<String>,
+    /// Column of the --codes-from table holding the parent code.
+    #[arg(long, requires = "codes_from")]
+    codes_parent_column: Option<String>,
+    /// Feature property matched against --codes-key (default: the name column).
+    #[arg(long, requires = "codes_from")]
+    codes_match: Option<String>,
+    /// Table giving parents' names by parent code (e.g. the Census `state.txt`),
+    /// for tooltips such as "Lancaster, Nebraska".
+    #[arg(long, requires_all = ["parent_names_key", "parent_names_column"])]
+    parent_names: Option<PathBuf>,
+    #[arg(long, requires = "parent_names")]
+    parent_names_key: Option<String>,
+    #[arg(long, requires = "parent_names")]
+    parent_names_column: Option<String>,
 }
 
 #[derive(clap::Args)]
@@ -1029,10 +1071,8 @@ fn run_convert(args: ConvertArgs) -> Result<()> {
                     .iter()
                     .find_map(|c| r.prop(c))
                     .unwrap_or_else(|| i.to_string()),
-                name: String::new(),
-                class: String::new(),
-                parent: None,
                 geometry: polygons_of(&r.geometry),
+                ..MapFeature::default()
             })
             .collect();
         report_repair(&validate::repair(&mut features, &CheckOptions::default()));
@@ -1098,6 +1138,49 @@ fn run_convert(args: ConvertArgs) -> Result<()> {
         }
     }
 
+    if let Some(path) = &args.codes_from {
+        let table = read_table(path)?;
+        let matched_on = args
+            .codes_match
+            .clone()
+            .unwrap_or_else(|| query.name_column.clone());
+        let s = apply_code_table(
+            &mut records,
+            &matched_on,
+            &table,
+            args.codes_key.as_deref().unwrap_or_default(),
+            args.codes_column.as_deref().unwrap_or_default(),
+            args.codes_parent_column.as_deref(),
+        )?;
+        eprintln!(
+            "codes: {}/{} regions matched {}",
+            s.matched,
+            records.len(),
+            path.display()
+        );
+        report_lookup_gaps(
+            "keys matching several codes (left without a code)",
+            &s.ambiguous,
+        );
+        report_lookup_gaps("unmatched (keep their original id)", &s.unmatched);
+    }
+    if let Some(path) = &args.parent_names {
+        let table = read_table(path)?;
+        let s = apply_parent_names(
+            &mut records,
+            &table,
+            args.parent_names_key.as_deref().unwrap_or_default(),
+            args.parent_names_column.as_deref().unwrap_or_default(),
+            &args.ids_prefix,
+        )?;
+        eprintln!(
+            "parent names: {} regions named from {}",
+            s.matched,
+            path.display()
+        );
+        report_lookup_gaps("parent codes without a name", &s.unmatched);
+    }
+
     let table = query.table.clone().unwrap_or_else(|| stem(&args.input));
     let mut index_columns = query.id_columns.clone();
     index_columns.extend(query.filter_column.clone());
@@ -1124,6 +1207,23 @@ fn run_convert(args: ConvertArgs) -> Result<()> {
         started.elapsed().as_secs_f64()
     );
     Ok(())
+}
+
+fn report_lookup_gaps(what: &str, items: &[String]) {
+    if items.is_empty() {
+        return;
+    }
+    let shown: Vec<&str> = items.iter().take(8).map(String::as_str).collect();
+    let more = items.len().saturating_sub(8);
+    eprintln!(
+        "     {what}: {}{}",
+        shown.join(", "),
+        if more > 0 {
+            format!(" and {more} more")
+        } else {
+            String::new()
+        }
+    );
 }
 
 fn is_areal(g: &geo_types::Geometry<f64>) -> bool {
@@ -1395,9 +1495,7 @@ mod tests {
         let f = |id: &str, name: &str| MapFeature {
             id: id.into(),
             name: name.into(),
-            class: String::new(),
-            parent: None,
-            geometry: geo_types::MultiPolygon(vec![]),
+            ..MapFeature::default()
         };
         let subject = [f("US-66010", "Guam"), f("h123", "h123")];
         let w = left_out_warning(&["US-66010".into(), "h123".into()], &subject);

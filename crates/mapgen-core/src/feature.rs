@@ -15,7 +15,26 @@ pub struct MapFeature {
     /// Code of the enclosing unit (e.g. the région of a département). Borders
     /// between features with different parents are drawn as parent borders.
     pub parent: Option<String>,
+    /// Name of the enclosing unit, shown in tooltips ("Lancaster, Nebraska").
+    pub parent_name: Option<String>,
+    /// Lowercase ISO 3166-1 alpha-2 code of the country the feature belongs
+    /// to, emitted as a class so tools like Maphue can colour by country.
+    pub country: Option<String>,
     pub geometry: MultiPolygon<f64>,
+}
+
+impl Default for MapFeature {
+    fn default() -> Self {
+        MapFeature {
+            id: String::new(),
+            name: String::new(),
+            class: String::new(),
+            parent: None,
+            parent_name: None,
+            country: None,
+            geometry: MultiPolygon(vec![]),
+        }
+    }
 }
 
 /// A line feature, such as a disputed boundary.

@@ -14,6 +14,8 @@ struct RawFeature {
     name: Option<String>,
     filter: Option<String>,
     parent: Option<String>,
+    parent_name: Option<String>,
+    country: Option<String>,
     geometry: Geometry<f64>,
 }
 
@@ -34,7 +36,11 @@ pub fn rows_from_str(text: &str, query: &LayerQuery) -> Result<Vec<(Option<Strin
                 name: r.name.unwrap_or_else(|| r.id.clone()),
                 id: r.id,
                 class: query.class.clone(),
+                // A parent's name means nothing without its code (Natural
+                // Earth's `region` is a census region for US states).
+                parent_name: r.parent.as_ref().and(r.parent_name),
                 parent: r.parent,
+                country: r.country.as_deref().and_then(crate::iso::country_alpha2),
                 geometry: into_multipolygon(r.geometry),
             };
             (r.filter, feature)
@@ -141,6 +147,8 @@ fn raw_features(text: &str, query: &LayerQuery) -> Result<Vec<RawFeature>> {
             RawFeature {
                 filter: query.filter_column.as_deref().and_then(|c| r.prop(c)),
                 parent: query.parent_column.as_deref().and_then(|c| r.prop(c)),
+                parent_name: query.parent_name_column.as_deref().and_then(|c| r.prop(c)),
+                country: query.country_column.as_deref().and_then(|c| r.prop(c)),
                 name,
                 id,
                 geometry: r.geometry,
@@ -160,9 +168,8 @@ pub fn read_features(
         table: None,
         id_columns: vec![id_property.to_owned()],
         name_column: name_property.to_owned(),
-        filter_column: None,
-        parent_column: None,
         class: class.to_owned(),
+        ..LayerQuery::default()
     };
     Ok(read_rows(path, &query)?
         .into_iter()
