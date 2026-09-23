@@ -71,19 +71,44 @@
                 <div class="section-title"><span class="status-dot status-dot-amber" aria-hidden="true"></span><h2 id="map-heading">1. Map</h2></div>
                 <span class="section-meta" id="data-status">Natural Earth 1:10m</span>
               </div>
-              <p class="section-note">Draw whole countries, or the states, provinces and départements of the countries you pick. Neighbours, lakes and disputed borders are drawn around them.</p>
-              <div class="scope-switcher" role="group" aria-label="What to draw">
+              <p class="section-note">Draw whole countries, the states, provinces and départements of the countries you pick, both mixed, or your own file. Neighbours, lakes and disputed borders are drawn around them.</p>
+              <div class="scope-switcher scope-switcher-4" role="group" aria-label="What to draw">
                 <button class="is-active" type="button" data-mode="countries" aria-pressed="true">Countries</button>
                 <button type="button" data-mode="subdivisions" aria-pressed="false">Subdivisions</button>
+                <button type="button" data-mode="mixed" aria-pressed="false" title="Countries and single subdivisions together">Mixed</button>
+                <button type="button" data-mode="file" aria-pressed="false" title="A GeoJSON file or a Wikimedia Commons map">File</button>
+              </div>
+              <label class="field" id="worldview-field" hidden><span>Point of view on disputed borders</span>
+                <select id="worldview"><option value="">De facto (Natural Earth)</option></select>
+              </label>
+              <div class="file-panel" id="file-panel" hidden>
+                <input id="geojson-file" type="file" accept=".geojson,.json,application/geo+json,application/json" hidden>
+                <div class="import-actions">
+                  <button class="secondary-action" id="choose-geojson" type="button">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0-12 4 4m-4-4L8 7M4 14v5h16v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                    <span>Choose GeoJSON</span>
+                  </button>
+                </div>
+                <div class="field-group field-group-action">
+                  <label class="field"><span>Or a Wikimedia Commons map</span><input id="commons-page" type="text" placeholder="Data:Paris arrondissements.map" spellcheck="false"></label>
+                  <button class="secondary-action" id="load-commons" type="button"><span>Load</span></button>
+                </div>
+                <div class="field-group">
+                  <label class="field"><span>Layout</span>
+                    <select id="file-layout"><option value="custom">id and name (or title)</option><option value="geoboundaries">geoBoundaries</option><option value="ne-admin0">Natural Earth countries</option><option value="ne-admin1">Natural Earth subdivisions</option></select>
+                  </label>
+                  <label class="field"><span>Data credit</span><input id="file-credit" type="text" placeholder="Source (licence)"></label>
+                </div>
+                <output class="import-report" id="file-report" hidden></output>
               </div>
             </section>
 
-            <section class="control-section" aria-labelledby="countries-heading">
+            <section class="control-section" id="regions-section" aria-labelledby="countries-heading">
               <div class="section-heading">
                 <div class="section-title"><span class="status-dot" aria-hidden="true"></span><h2 id="countries-heading">2. Countries</h2></div>
                 <span class="section-meta" id="selected-count">none selected</span>
               </div>
-              <p class="section-note">Search by name, ISO-2 or ISO-3, or click countries on the map to add or remove them.</p>
+              <p class="section-note" id="regions-note">Search by name, ISO-2 or ISO-3, or click countries on the map to add or remove them.</p>
               <div class="selected-chips" id="selected-chips" aria-live="polite"></div>
               <label class="search-field field" for="country-search">
                 <span>Find a country</span>
@@ -108,6 +133,15 @@
                 <label class="field"><span>Title</span><input id="title" type="text" maxlength="200" placeholder="Optional"></label>
                 <label class="field"><span>Width (px)</span><input id="width" type="number" min="100" max="4000" step="50" value="1000"></label>
               </div>
+              <label class="toggle-row" for="show-title">
+                <span><strong>Title on the map</strong><small>In a band above it</small></span>
+                <input id="show-title" type="checkbox"><span class="toggle-control" aria-hidden="true"></span>
+              </label>
+              <div class="field-group">
+                <label class="field"><span>Caption</span><input id="caption" type="text" maxlength="1000" placeholder="Under the map"></label>
+                <label class="field"><span>Height (px)</span><input id="height" type="number" min="50" max="10000" step="50" placeholder="Fit"></label>
+              </div>
+              <label class="field"><span>Description for screen readers</span><input id="alt" type="text" maxlength="1000" placeholder="e.g. Map of the Benelux countries"></label>
               <label class="toggle-row" for="labels">
                 <span><strong>Labels</strong><small>Region names, placed to fit</small></span>
                 <input id="labels" type="checkbox"><span class="toggle-control" aria-hidden="true"></span>
@@ -123,9 +157,23 @@
                   <select id="projection"><option value="auto">Automatic</option><option value="laea">Lambert equal-area</option><option value="equal-earth">Equal Earth</option><option value="albers">Albers conic</option><option value="lcc">Lambert conformal conic</option></select>
                 </label>
                 <label class="field"><span>Frame</span>
-                  <select id="frame"><option value="auto">Main landmass</option><option value="all">Everything</option><option value="world">World</option></select>
+                  <select id="frame"><option value="auto">Main landmass</option><option value="all">Everything</option><option value="world">World</option><optgroup label="Area" id="frame-presets"></optgroup><option value="custom">Custom box…</option></select>
                 </label>
               </div>
+              <fieldset class="bbox-fields" id="bbox-fields" hidden>
+                <legend>Box, in degrees</legend>
+                <label class="field"><span>West</span><input id="bbox-west" type="number" min="-180" max="180" step="any"></label>
+                <label class="field"><span>South</span><input id="bbox-south" type="number" min="-90" max="90" step="any"></label>
+                <label class="field"><span>East</span><input id="bbox-east" type="number" min="-180" max="180" step="any"></label>
+                <label class="field"><span>North</span><input id="bbox-north" type="number" min="-90" max="90" step="any"></label>
+              </fieldset>
+              <label class="toggle-row" for="context-labels">
+                <span><strong>Neighbour names</strong><small>Where there is room</small></span>
+                <input id="context-labels" type="checkbox"><span class="toggle-control" aria-hidden="true"></span>
+              </label>
+              <label class="field"><span>Capitals</span>
+                <select id="capitals"><option value="none">None</option><option value="countries">National capitals</option><option value="all">National and regional capitals</option></select>
+              </label>
               <label class="toggle-row" for="insets">
                 <span><strong>Insets</strong><small>Far-away parts in corner boxes</small></span>
                 <input id="insets" type="checkbox" checked><span class="toggle-control" aria-hidden="true"></span>

@@ -199,8 +199,11 @@ const { svg } = gen.render({ region: "FRA", theme: "dark", colors: { water: "#12
 
 The playground at <https://map-generator.toolforge.org/> (`crates/mapgen-wasm/www`) makes
 custom maps in the browser. You pick countries (search, or click them on the map), either
-whole or as their subdivisions, then set the design: title, labels in any Natural Earth
-language, projection, frame, insets and colours. You can also import a
+whole, as their subdivisions, or mixed with single subdivisions (Switzerland and Bavaria),
+or load your own GeoJSON or a Wikimedia Commons `Data:*.map` page, in any Natural Earth point
+of view. Then you set the design: title (on the map or not), caption, screen-reader
+description, labels in any Natural Earth language, neighbour names, capitals, projection,
+frame (area presets or a custom box), fixed height, insets and colours. You can also import a
 [map recipe](docs/recipes.md), a whole map as a `key,value` CSV. Exports are SVG (ready for
 Commons), PNG, the recipe, or a link to the same map from the API. It shares
 [Maphue](https://maphue.toolforge.org/)'s design. To run it locally:

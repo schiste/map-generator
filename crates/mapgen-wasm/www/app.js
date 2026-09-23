@@ -1,26 +1,35 @@
-// map-generator playground: custom maps of any countries (or their
-// subdivisions), rendered in the browser with WebAssembly. Pick countries in
+// map-generator playground: custom maps of any countries, their
+// subdivisions, both mixed, or a file (GeoJSON, or a Wikimedia Commons
+// Data:*.map page), rendered in the browser with WebAssembly. Pick regions in
 // the list or on the map, or apply a recipe CSV; export SVG, PNG, the recipe,
 // or a link to the same map from the public API.
-import init, { MapGenerator, themes, version, parseRecipe, recipeToCsv } from "./pkg/mapgen_wasm.js";
+import init, { MapGenerator, themes, version, parseRecipe, recipeToCsv, bboxPresets } from "./pkg/mapgen_wasm.js";
 
 // Pinned to the same Natural Earth commit as scripts/fetch-data.sh. A
 // deployment can serve the files itself (<meta name="mapgen-data" content="data/">),
 // so visitors' browsers contact no third party (Toolforge's rule).
+const HOSTED = document.querySelector('meta[name="mapgen-data"]')?.content;
 const NE =
-  document.querySelector('meta[name="mapgen-data"]')?.content ||
-  "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/ca96624a56bd078437bca8184e78163e5039ad19/geojson/";
+  HOSTED || "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/ca96624a56bd078437bca8184e78163e5039ad19/geojson/";
 const FILES = {
   countries: NE + "ne_10m_admin_0_countries.geojson",
   subdivisions: NE + "ne_10m_admin_1_states_provinces.geojson",
   lakes: NE + "ne_10m_lakes.geojson",
   disputed: NE + "ne_10m_admin_0_boundary_lines_disputed_areas.geojson",
   disputedAreas: NE + "ne_10m_admin_0_disputed_areas.geojson",
+  // Capitals: the deployment's filtered copy, else Natural Earth's full file.
+  capitals: HOSTED ? NE + "ne_10m_capitals.geojson" : NE + "ne_10m_populated_places.geojson",
 };
+// Points of view: differences from the de facto countries, written by
+// scripts/worldview-diffs.py (hosted deployments only).
+const VIEWS = HOSTED && NE + "worldviews.json";
+const viewFile = (v) => NE + `ne_10m_admin_0_countries.${v}.json`;
+const COMMONS_API = "https://commons.wikimedia.org/w/api.php";
 const API = location.hostname.endsWith("toolforge.org")
   ? `${location.origin}/api/v1`
   : "https://map-generator.toolforge.org/api/v1";
-const DATASET = { countries: "ne-admin0", subdivisions: "ne-admin1" };
+const DATASET = { countries: "ne-admin0", subdivisions: "ne-admin1", mixed: "mixed", file: null };
+const MODE_LABEL = { countries: "Countries", subdivisions: "Subdivisions", mixed: "Countries and subdivisions", file: "File" };
 // Every language Natural Earth names places in (name_xx columns), so labels
 // can switch to any of them and names in any of them are recognised.
 const LANGUAGES = [
@@ -40,12 +49,18 @@ const state = {
   mode: "countries",
   selected: [],
   colors: {},
-  /** Recipe settings without a control here (label size, bbox…), kept for export. */
+  /** Recipe settings without a control here (label size…), kept for export. */
   extra: {},
+  /** Natural Earth point of view ("IND"), or "" for the de facto one. */
+  worldview: "",
+  /** File mode: { text, name, credit, layout }. */
+  file: null,
 };
 const generators = {};
 const texts = {};
 let countryList = [];
+/** Mixed mode: single subdivisions, searchable. */
+let subdivisionList = [];
 let byIso2 = new Map();
 let lastOutput = null;
 let pending = 0;
@@ -58,8 +73,12 @@ const probe = document.createElement("canvas").getContext("2d");
 
 await init();
 const THEMES = themes();
+const PRESETS = bboxPresets();
 $("version").textContent = `v${version()}`;
 for (const name of Object.keys(THEMES)) $("theme").add(new Option(name, name));
+for (const name of Object.keys(PRESETS)) {
+  $("frame-presets").append(new Option(name.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase()), `preset:${name}`));
+}
 buildColorControls();
 initInterfaceTheme();
 bindControls();
@@ -80,23 +99,54 @@ async function fetchText(key, label) {
   return texts[key];
 }
 
+/** The countries, in the chosen point of view. */
+async function countriesText() {
+  const base = await fetchText("countries", "countries");
+  if (!state.worldview) return base;
+  const key = `view:${state.worldview}`;
+  if (!texts[key]) {
+    texts[key] = (async () => {
+      $("loading-text").textContent = `Downloading the ${state.worldview} point of view…`;
+      const res = await fetch(viewFile(state.worldview));
+      if (!res.ok) throw new Error(`point of view ${state.worldview}: HTTP ${res.status}`);
+      const diff = await res.json();
+      const doc = JSON.parse(base);
+      const removed = new Set(diff.removed);
+      doc.features = doc.features.filter((_, i) => !removed.has(i)).concat(diff.added);
+      return JSON.stringify(doc);
+    })();
+  }
+  return texts[key];
+}
+
 /** The generator for a mode, loading its data on first use. */
 async function generator(mode) {
   if (generators[mode]) return generators[mode];
   showLoading(true);
   try {
     const [countries, lakes, disputed, disputedAreas] = await Promise.all([
-      fetchText("countries", "countries"),
+      countriesText(),
       fetchText("lakes", "lakes"),
       fetchText("disputed", "disputed borders"),
       fetchText("disputedAreas", "disputed areas"),
     ]);
-    const subject = mode === "subdivisions" ? await fetchText("subdivisions", "subdivisions (once, 12 MB)") : countries;
+    const subdivisions = mode === "subdivisions" || mode === "mixed"
+      ? await fetchText("subdivisions", "subdivisions (once, 12 MB)")
+      : null;
     $("loading-text").textContent = "Preparing the map…";
     await new Promise(requestAnimationFrame);
+    const worldview = state.worldview || undefined;
     const g = new MapGenerator();
-    g.setSubject(subject, { dataset: DATASET[mode], languages: LANGUAGES });
-    g.setContext(countries);
+    if (mode === "file") {
+      const f = state.file;
+      g.setSubject(f.text, { dataset: f.layout, nameProperty: f.nameProperty, attribution: f.credit || undefined });
+    } else if (mode === "subdivisions") {
+      g.setSubject(subdivisions, { dataset: "ne-admin1", languages: LANGUAGES });
+    } else {
+      g.setSubject(countries, { dataset: "ne-admin0", languages: LANGUAGES, worldview });
+    }
+    if (mode === "mixed") g.setSubdivisions(subdivisions, { dataset: "ne-admin1", languages: LANGUAGES });
+    g.setContext(countries, { dataset: "ne-admin0", worldview });
     g.setLakes(lakes);
     g.setDisputed(disputed);
     g.setDisputedAreas(disputedAreas);
@@ -107,6 +157,50 @@ async function generator(mode) {
   }
 }
 
+/** Loads capitals into a generator the first time a map asks for them. */
+const withPlaces = new WeakSet();
+async function ensurePlaces(g) {
+  if (withPlaces.has(g)) return;
+  showLoading(true);
+  try {
+    const text = await fetchText("capitals", "capitals");
+    g.setPlaces(text, LANGUAGES);
+    withPlaces.add(g);
+  } finally {
+    showLoading(false);
+  }
+}
+
+/** Points of view the deployment hosts, named after their country. */
+async function loadWorldviews() {
+  if (!VIEWS) return;
+  try {
+    const res = await fetch(VIEWS);
+    if (!res.ok) return;
+    const views = await res.json();
+    const names = new Map(countryList.map((c) => [c.code, c.name]));
+    const label = (v) => ({ ISO: "ISO 3166", TLC: "TLC" })[v] ?? (names.get(v) ? `${names.get(v)} (${v})` : v);
+    const options = views.map((v) => new Option(label(v), v)).sort((a, b) => a.text.localeCompare(b.text));
+    $("worldview").append(...options);
+    $("worldview").value = state.worldview;
+    $("worldview-field").hidden = state.mode === "file";
+  } catch {
+    // No points of view: the de facto one only.
+  }
+}
+
+async function setWorldview(view) {
+  view = (view || "").toUpperCase();
+  if (view && ![...$("worldview").options].some((o) => o.value === view)) {
+    throw new Error(`The point of view ${view} is not available here; the API has them all (worldview=${view}).`);
+  }
+  if (view === state.worldview) return;
+  state.worldview = view;
+  $("worldview").value = view;
+  // The countries changed: every generator reads them again.
+  for (const k of Object.keys(generators)) delete generators[k];
+}
+
 async function setMode(mode, { rerender = true } = {}) {
   state.mode = mode;
   for (const b of document.querySelectorAll("[data-mode]")) {
@@ -114,16 +208,100 @@ async function setMode(mode, { rerender = true } = {}) {
     b.classList.toggle("is-active", on);
     b.setAttribute("aria-pressed", String(on));
   }
-  $("toolbar-label").textContent = `${mode === "countries" ? "Countries" : "Subdivisions"} · Natural Earth 1:10m`;
-  const g = await generator(mode);
+  const file = mode === "file";
+  $("file-panel").hidden = !file;
+  $("worldview-field").hidden = file || $("worldview").options.length < 2;
+  $("regions-section").hidden = file;
+  $("toolbar-label").textContent = file
+    ? `File · ${state.file?.name ?? "none loaded"}`
+    : `${MODE_LABEL[mode]} · Natural Earth 1:10m`;
+  $("regions-note").textContent = mode === "mixed"
+    ? "Search countries, or states, provinces and départements by name, code or Wikidata item; click countries on the map to add them."
+    : "Search by name, ISO-2 or ISO-3, or click countries on the map to add or remove them.";
+  $("country-search").placeholder = mode === "mixed" ? "France, Bavaria, FR-75…" : "France, FR, or FRA";
+  if (file) {
+    // The selection waits for the way back: a file is the whole map.
+    if (!state.file) {
+      $("data-status").textContent = "no file";
+      if (rerender) render();
+      return;
+    }
+  }
+  const g = await generator(file ? "countries" : mode);
   countryList = g.countries().sort((a, b) => a.name.localeCompare(b.name));
   byIso2 = new Map(countryList.filter((c) => c.iso2).map((c) => [c.iso2, c.code]));
-  const known = new Set(countryList.map((c) => c.code));
-  state.selected = state.selected.filter((c) => known.has(c));
+  subdivisionList = [];
+  if (mode === "mixed") {
+    const countryName = new Map(countryList.map((c) => [c.iso2, c.name]));
+    subdivisionList = g.subdivisions()
+      .map((s) => ({ ...s, where: [s.parentName, countryName.get(s.iso2)].filter(Boolean).join(", ") }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+  if (file) await generator("file");
+  if (!file) {
+    const known = new Set([...countryList, ...subdivisionList].map((c) => c.code));
+    state.selected = state.selected.filter((c) => known.has(c));
+  }
   $("country-search").disabled = false;
-  $("data-status").textContent = `${countryList.length} countries`;
+  $("data-status").textContent = file
+    ? state.file.name
+    : mode === "mixed" ? `${countryList.length} countries, ${subdivisionList.length} subdivisions` : `${countryList.length} countries`;
+  if ($("worldview").options.length < 2) await loadWorldviews();
   renderCountryList();
   if (rerender) render();
+}
+
+// ---------------------------------------------------------------- files
+
+/** Loads a GeoJSON text as the map (File mode). */
+async function loadFile(text, name, credit) {
+  const report = $("file-report");
+  report.hidden = false;
+  report.classList.remove("has-issues");
+  try {
+    const doc = JSON.parse(text);
+    const features = doc.type === "FeatureCollection" ? doc.features : [doc];
+    // Commons maps (and many others) name features with `title`.
+    const props = features.map((f) => f?.properties ?? {});
+    const nameProperty = props.some((p) => "name" in p) || !props.some((p) => "title" in p) ? undefined : "title";
+    if (credit !== undefined) $("file-credit").value = credit;
+    state.file = { text, name, credit: $("file-credit").value.trim(), layout: $("file-layout").value, nameProperty };
+    delete generators.file;
+    await setMode("file");
+    report.textContent = `${name}: ${features.length} ${features.length === 1 ? "feature" : "features"}.`
+      + (state.file.credit ? "" : " Add a data credit: Commons needs the source and licence.");
+    report.classList.toggle("has-issues", !state.file.credit);
+  } catch (e) {
+    report.textContent = messageOf(e);
+    report.classList.add("has-issues");
+  }
+}
+
+/** A Commons map page (`Data:X.map`, with or without the prefix, or its URL). */
+async function loadCommons(input) {
+  let title = decodeURIComponent(input.trim().replace(/^https?:\/\/commons\.wikimedia\.org\/wiki\//, "")).replace(/_/g, " ");
+  if (!title) return;
+  if (!/^Data:/i.test(title)) title = `Data:${title}`;
+  if (!/\.map$/i.test(title)) title += ".map";
+  const params = new URLSearchParams({
+    action: "query", format: "json", formatversion: "2", origin: "*",
+    prop: "revisions", rvprop: "content", rvslots: "main", titles: title,
+  });
+  showLoading(true);
+  $("loading-text").textContent = `Downloading ${title} from Wikimedia Commons…`;
+  try {
+    const res = await fetch(`${COMMONS_API}?${params}`);
+    if (!res.ok) throw new Error(`Commons: HTTP ${res.status}`);
+    const page = (await res.json()).query?.pages?.[0];
+    if (!page || page.missing) throw new Error(`${title} does not exist on Wikimedia Commons.`);
+    const map = JSON.parse(page.revisions[0].slots.main.content);
+    if (!map.data) throw new Error(`${title} has no map data.`);
+    const licence = map.license?.code ?? map.license ?? "";
+    const credit = `${title.replace(/^Data:/, "")}, Wikimedia Commons${licence ? ` (${licence})` : ""}`;
+    await loadFile(JSON.stringify(map.data), title, credit);
+  } finally {
+    showLoading(false);
+  }
 }
 
 // ---------------------------------------------------------------- selection
@@ -137,15 +315,18 @@ function toggleCountry(code) {
 }
 
 function countryName(code) {
-  return countryList.find((c) => c.code === code)?.name ?? code;
+  return (countryList.find((c) => c.code === code) ?? subdivisionList.find((s) => s.code === code))?.name ?? code;
 }
 
 function renderCountryList() {
   const q = $("country-search").value.trim().toLowerCase();
   const selected = new Set(state.selected);
-  const matches = countryList
-    .filter((c) => !q || [c.name, c.code, c.iso2 ?? ""].some((v) => v.toLowerCase().includes(q)))
-    .slice(0, q ? 80 : 60);
+  // Names in every language count ("Bavaria" finds Bayern).
+  const hit = (c) =>
+    !q || [c.name, c.code, c.iso2 ?? "", c.wikidata ?? "", ...Object.values(c.names ?? {})]
+      .some((v) => v.toLowerCase().includes(q));
+  // Subdivisions (Mixed) only when searching: there are thousands.
+  const matches = countryList.filter(hit).concat(q ? subdivisionList.filter(hit) : []).slice(0, q ? 80 : 60);
   $("country-list").replaceChildren(
     ...matches.map((c) => {
       const b = document.createElement("button");
@@ -157,7 +338,9 @@ function renderCountryList() {
       b.setAttribute("aria-label", `${c.name}, ${on ? "selected. Activate to remove" : "activate to add"}`);
       b.innerHTML = `<span class="country-swatch" aria-hidden="true"></span><span class="country-option-name"></span><span class="country-option-code"></span>`;
       b.querySelector(".country-option-name").textContent = c.name;
-      b.querySelector(".country-option-code").textContent = [c.iso2?.toUpperCase(), c.code].filter(Boolean).join(" · ");
+      b.querySelector(".country-option-code").textContent = c.where !== undefined
+        ? [c.where, c.code].filter(Boolean).join(" · ")
+        : [c.iso2?.toUpperCase(), c.code].filter(Boolean).join(" · ");
       return b;
     }),
   );
@@ -232,7 +415,21 @@ function currentSpec() {
   if (languages.length) spec.languages = languages;
   if ($("target").value !== "commons") spec.target = $("target").value;
   if ($("projection").value !== "auto") spec.projection = $("projection").value;
-  if ($("frame").value !== "auto") spec.frame = $("frame").value;
+  const frame = $("frame").value;
+  if (frame.startsWith("preset:")) spec.bbox = frame.slice(7);
+  else if (frame === "custom") {
+    const box = ["west", "south", "east", "north"].map((k) => $(`bbox-${k}`).value.trim());
+    if (box.every((v) => v !== "" && Number.isFinite(Number(v)))) spec.bbox = box.join(",");
+  } else if (frame !== "auto") spec.frame = frame;
+  if ($("show-title").checked) spec.showTitle = true;
+  const caption = $("caption").value.trim();
+  if (caption) spec.caption = caption;
+  const alt = $("alt").value.trim();
+  if (alt) spec.alt = alt;
+  const height = Math.round(Number($("height").value));
+  if (height) spec.height = Math.min(10000, Math.max(50, height));
+  if ($("context-labels").checked) spec.contextLabels = true;
+  if ($("capitals").value !== "none") spec.capitals = $("capitals").value;
   if (!$("insets").checked) spec.insets = "none";
   if ($("credit").checked) spec.credit = true;
   if (Object.keys(state.colors).length) spec.colors = { ...state.colors };
@@ -257,6 +454,19 @@ function setControls(spec) {
   $("target").value = take("target", "commons");
   $("projection").value = take("projection", "auto");
   $("frame").value = take("frame", "auto");
+  const bbox = take("bbox", null);
+  if (bbox && PRESETS[bbox]) $("frame").value = `preset:${bbox}`;
+  else if (bbox) {
+    $("frame").value = "custom";
+    String(bbox).split(/[,;]/).forEach((v, i) => ($(`bbox-${["west", "south", "east", "north"][i]}`).value = v.trim()));
+  }
+  $("bbox-fields").hidden = $("frame").value !== "custom";
+  $("show-title").checked = take("showTitle", false);
+  $("caption").value = take("caption", "");
+  $("alt").value = take("alt", "");
+  $("height").value = take("height", "");
+  $("context-labels").checked = take("contextLabels", false);
+  $("capitals").value = take("capitals", "none");
   $("insets").checked = take("insets", "auto") !== "none";
   $("credit").checked = take("credit", false);
   delete s.region;
@@ -275,13 +485,15 @@ function render() {
 }
 
 async function renderNow() {
-  if (!generators[state.mode]) return;
-  const picking = state.selected.length === 0;
+  const file = state.mode === "file";
+  if (file ? state.file && !generators.file : !generators[state.mode]) return;
+  const picking = file ? !state.file : state.selected.length === 0;
   // Nothing selected yet: the world, to pick countries from.
   const g = picking ? await generator("countries") : generators[state.mode];
   const spec = picking
     ? { frame: "world", width: 1200, theme: $("theme").value, colors: { ...state.colors } }
-    : { ...currentSpec(), regions: [...state.selected] };
+    : file ? currentSpec() : { ...currentSpec(), regions: [...state.selected] };
+  if (spec.capitals) await ensurePlaces(g);
   const t = performance.now();
   const out = g.render(spec);
   const ms = Math.round(performance.now() - t);
@@ -290,7 +502,7 @@ async function renderNow() {
   $("map-tooltip").hidden = true;
   container.innerHTML = out.svg;
   // A different map (selection, size) starts fitted; a restyle keeps the zoom.
-  const key = `${picking}|${state.mode}|${state.selected.join()}|${out.width}x${out.height}`;
+  const key = `${picking}|${state.mode}|${state.worldview}|${state.file?.name}|${state.selected.join()}|${out.width}x${out.height}`;
   if (key !== view.key) {
     view.key = key;
     fitView();
@@ -301,18 +513,24 @@ async function renderNow() {
   $("map-frame").style.setProperty("--map-aspect", String(out.width / out.height));
   const kb = Math.round(new Blob([out.svg]).size / 1024);
   $("render-meta").textContent = picking
-    ? "choose countries"
+    ? (file ? "load a file" : "choose countries")
     : `${out.regions} regions · ${out.width}×${out.height} · ${out.projection} · ${kb} KB · ${ms} ms`;
   const n = state.selected.length;
-  $("toolbar-title").textContent = picking
-    ? "Click countries to build your map"
-    : `${n} ${n === 1 ? "country" : "countries"} · click a neighbour to add it`;
-  for (const id of ["download-svg", "download-png", "download-recipe", "copy-api"]) $(id).disabled = picking;
+  const noun = state.mode === "mixed" ? ["region", "regions"] : ["country", "countries"];
+  $("toolbar-title").textContent = file
+    ? (picking ? "Choose a GeoJSON file or a Commons map" : state.file.name)
+    : picking
+      ? "Click countries to build your map"
+      : `${n} ${noun[n === 1 ? 0 : 1]} · click a neighbour to add it`;
+  for (const id of ["download-svg", "download-png"]) $(id).disabled = picking;
+  // A file isn't on the API: no recipe or link for it.
+  for (const id of ["download-recipe", "copy-api"]) $(id).disabled = picking || file;
   save();
 }
 
 /** The country a clicked map path stands for. */
 function countryOf(path) {
+  if (state.mode === "file") return null;
   const subdivision = state.mode === "subdivisions"
     && path.classList.contains("mg-land")
     && !$("map-container").classList.contains("is-picking");
@@ -330,18 +548,19 @@ async function applyRecipe(text) {
   report.classList.remove("has-issues");
   try {
     const recipe = parseRecipe(text);
-    const mode = !recipe.dataset || recipe.dataset === "ne-admin0" ? "countries"
-      : recipe.dataset === "ne-admin1" ? "subdivisions" : null;
+    const mode = Object.keys(DATASET).find((m) => DATASET[m] === (recipe.dataset || "ne-admin0"));
     if (!mode) {
       throw new Error(`The dataset ${recipe.dataset} is on the API only: POST this recipe to ${API}/render (Content-Type: text/csv).`);
     }
     setControls(recipe.spec);
+    await setWorldview(recipe.worldview);
     await setMode(mode, { rerender: false });
     const { codes, unknown } = generators[mode].resolveRegions(recipe.regions);
     state.selected = codes;
     renderCountryList();
     render();
-    report.textContent = `Applied: ${codes.length} ${codes.length === 1 ? "country" : "countries"}`
+    const noun = mode === "mixed" ? ["region", "regions"] : ["country", "countries"];
+    report.textContent = `Applied: ${codes.length} ${noun[codes.length === 1 ? 0 : 1]}`
       + (unknown.length ? `. Not found: ${unknown.join(", ")}.` : ".");
     report.classList.toggle("has-issues", unknown.length > 0);
   } catch (e) {
@@ -351,7 +570,12 @@ async function applyRecipe(text) {
 }
 
 function recipeText() {
-  return recipeToCsv({ dataset: DATASET[state.mode], regions: state.selected, spec: currentSpec() });
+  return recipeToCsv({
+    dataset: DATASET[state.mode],
+    regions: state.selected,
+    worldview: state.worldview || undefined,
+    spec: currentSpec(),
+  });
 }
 
 /** The same map from the public API. */
@@ -364,6 +588,7 @@ function apiLink() {
       params.set(kebab(k), Array.isArray(v) ? v.join(",") : String(v));
     }
   }
+  if (state.worldview) params.set("worldview", state.worldview);
   const q = params.toString();
   return `${API}/maps/${DATASET[state.mode]}/${[...state.selected].sort().join(",")}.svg${q ? "?" + q : ""}`;
 }
@@ -429,8 +654,37 @@ function bindControls() {
   });
 
   $("theme").addEventListener("change", (e) => applyTheme(e.target.value));
-  for (const id of ["title", "width", "labels", "languages", "target", "projection", "frame", "insets", "credit"]) {
+  for (const id of [
+    "title", "width", "labels", "languages", "target", "projection", "frame", "insets", "credit",
+    "show-title", "caption", "alt", "height", "context-labels", "capitals",
+    "bbox-west", "bbox-south", "bbox-east", "bbox-north",
+  ]) {
     $(id).addEventListener("change", render);
+  }
+  $("frame").addEventListener("change", () => ($("bbox-fields").hidden = $("frame").value !== "custom"));
+  $("worldview").addEventListener("change", (e) =>
+    guard(async () => {
+      await setWorldview(e.target.value);
+      await setMode(state.mode);
+    }));
+  $("choose-geojson").addEventListener("click", () => $("geojson-file").click());
+  $("geojson-file").addEventListener("change", async () => {
+    const file = $("geojson-file").files[0];
+    if (!file) return;
+    $("geojson-file").value = "";
+    await loadFile(await file.text(), file.name, "");
+  });
+  $("load-commons").addEventListener("click", () => guard(() => loadCommons($("commons-page").value)));
+  $("commons-page").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") guard(() => loadCommons($("commons-page").value));
+  });
+  for (const id of ["file-layout", "file-credit"]) {
+    $(id).addEventListener("change", () => {
+      if (!state.file) return;
+      state.file = { ...state.file, credit: $("file-credit").value.trim(), layout: $("file-layout").value };
+      delete generators.file;
+      guard(() => setMode("file"));
+    });
   }
 
   const map = $("map-container");
@@ -441,7 +695,8 @@ function bindControls() {
       .elementsFromPoint(e.clientX, e.clientY)
       .find((el) => el.matches?.("path.mg-land[data-code], path.mg-context[data-code]"));
     const code = p && countryOf(p);
-    if (code && countryList.some((c) => c.code === code)) toggleCountry(code);
+    const known = (c) => c.code === code;
+    if (code && (countryList.some(known) || subdivisionList.some(known))) toggleCountry(code);
   });
   bindZoom();
   map.addEventListener("mousemove", (e) => {
@@ -476,14 +731,15 @@ function bindControls() {
       await navigator.clipboard.writeText(apiLink());
       toast("API link copied: the same map, from map-generator.toolforge.org");
     }));
-  $("reset-button").addEventListener("click", () => {
-    state.selected = [];
-    setControls({});
-    $("recipe-text").value = "";
-    $("recipe-report").hidden = true;
-    renderCountryList();
-    render();
-  });
+  $("reset-button").addEventListener("click", () =>
+    guard(async () => {
+      state.selected = [];
+      setControls({});
+      $("recipe-text").value = "";
+      $("recipe-report").hidden = true;
+      await setWorldview("");
+      await setMode(state.mode);
+    }));
 }
 
 // ---------------------------------------------------------------- zoom & pan
@@ -667,8 +923,9 @@ function setInterfaceTheme(theme, persist = true) {
   if (persist) write(STORAGE.theme, theme);
 }
 
-/** The current map as a recipe, so a reload brings it back. */
+/** The current map as a recipe, so a reload brings it back (not a file). */
 function save() {
+  if (state.mode === "file") return;
   write(STORAGE.recipe, state.selected.length ? recipeText() : "");
 }
 

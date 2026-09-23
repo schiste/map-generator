@@ -1718,3 +1718,52 @@ dialog p {
   font-size: 9px;
   text-align: center;
 }
+
+.scope-switcher-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.scope-switcher-4 button {
+  padding: 0 4px;
+}
+
+.file-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.field-group-action {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.bbox-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.bbox-fields[hidden] {
+  display: none;
+}
+
+.bbox-fields legend {
+  margin-bottom: 6px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.bbox-fields input {
+  min-width: 0;
+}
+
+.country-option-kind {
+  color: var(--muted);
+  font-size: 10px;
+}

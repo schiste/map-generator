@@ -40,7 +40,7 @@ projection,laea
   Choropleth map template takes them. You can also write them in one row:
   `regions,France;DEU;Italy`. For `subdivisions`, the regions are the countries whose
   subdivisions are drawn.
-- **`worldview`**: a Natural Earth point of view for disputed borders, e.g. `IND` (API only).
+- **`worldview`**: a Natural Earth point of view for disputed borders, e.g. `IND`.
 - **Every other key** is a map setting, spelled exactly as the API's query parameters
   ([api.md](api.md#map-parameters)). Lists use `;` (a comma would split the CSV cell).
 

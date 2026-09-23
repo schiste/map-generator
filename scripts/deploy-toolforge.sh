@@ -102,6 +102,8 @@ if [[ "$www" -eq 1 ]]; then
   cp "$d/ne_10m_disputed_lines.geojson" "$stage/data/ne_10m_admin_0_boundary_lines_disputed_areas.geojson"
   cp "$d/ne_10m_disputed_areas.geojson" "$stage/data/ne_10m_admin_0_disputed_areas.geojson"
   cp "$d/ne_10m_capitals.geojson" "$stage/data/ne_10m_capitals.geojson"
+  # Points of view, as differences from the de facto countries.
+  python3 "$here/scripts/worldview-diffs.py" "$d/ne_10m_admin_0.geojson" "$stage/data"
   # Name the engine and data folders after their content (pkg-<hash>,
   # data-<hash>): the server caches those for a year (immutable), and a
   # deploy that changes them changes their URLs. A code-only deploy keeps
