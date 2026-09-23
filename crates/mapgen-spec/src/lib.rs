@@ -1,5 +1,7 @@
-//! Plain-Rust core of the WebAssembly API: option types, validation, and
-//! rendering. Kept free of `wasm-bindgen` so it is unit-tested natively.
+//! Options shared by the WebAssembly build and the HTTP API: layer and
+//! render specs (camelCase JSON, unknown fields rejected), validation, and
+//! rendering to a `MapOutput`. Free of `wasm-bindgen` and I/O, so the same
+//! JSON gives the same map in the browser, over HTTP and natively.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -146,7 +148,32 @@ impl LoadedLayer {
         if rows.is_empty() {
             return Err(SpecError("the GeoJSON contains no features".into()));
         }
-        let credit = spec.attribution.clone().or_else(|| {
+        let credit = Self::default_credit(spec);
+        Ok(LoadedLayer {
+            rows,
+            has_filter: query.filter_column.is_some(),
+            credit,
+        })
+    }
+
+    /// A layer from features already read (e.g. from a GeoPackage), each
+    /// with its region value. `has_filter` says whether regions are known.
+    pub fn from_rows(
+        rows: Vec<(Option<String>, MapFeature)>,
+        has_filter: bool,
+        credit: Option<String>,
+    ) -> Self {
+        LoadedLayer {
+            rows,
+            has_filter,
+            credit,
+        }
+    }
+
+    /// The credit a layer read with `spec` gets (Natural Earth presets
+    /// name their point of view).
+    pub fn default_credit(spec: &LayerSpec) -> Option<String> {
+        spec.attribution.clone().or_else(|| {
             matches!(
                 spec.dataset,
                 Dataset::NeAdmin0
@@ -156,12 +183,11 @@ impl LoadedLayer {
                     | Dataset::NeDisputedAreas
             )
             .then(|| natural_earth_credit(spec))
-        });
-        Ok(LoadedLayer {
-            rows,
-            has_filter: query.filter_column.is_some(),
-            credit,
         })
+    }
+
+    pub fn features(&self) -> impl Iterator<Item = &MapFeature> {
+        self.rows.iter().map(|(_, f)| f)
     }
 
     pub fn len(&self) -> usize {
@@ -232,6 +258,10 @@ impl LoadedLines {
             .clone()
             .or_else(|| natural_earth.then(|| natural_earth_credit(spec)));
         Ok(LoadedLines { lines, credit })
+    }
+
+    pub fn from_lines(lines: Vec<MapLine>, credit: Option<String>) -> Self {
+        LoadedLines { lines, credit }
     }
 
     pub fn len(&self) -> usize {

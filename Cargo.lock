@@ -695,6 +695,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mapgen-spec"
+version = "0.1.0"
+dependencies = [
+ "mapgen-core",
+ "mapgen-data",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mapgen-wasm"
 version = "0.1.0"
 dependencies = [
@@ -702,6 +712,7 @@ dependencies = [
  "js-sys",
  "mapgen-core",
  "mapgen-data",
+ "mapgen-spec",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",

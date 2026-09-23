@@ -14,6 +14,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 mapgen-core.workspace = true
 mapgen-data.workspace = true
+mapgen-spec.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 wasm-bindgen = "0.2"

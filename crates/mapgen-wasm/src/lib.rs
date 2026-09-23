@@ -12,7 +12,7 @@
 //! The same engine as the CLI, so the same input and options give
 //! byte-identical SVG in the browser, in Node.js and natively.
 
-mod spec;
+use mapgen_spec as spec;
 
 pub use spec::{
     bbox_table, parse_units, render_map, theme_table, Dataset, LayerSpec, LoadedLayer, LoadedLines,
