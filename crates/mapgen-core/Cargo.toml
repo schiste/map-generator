@@ -13,3 +13,4 @@ geo.workspace = true
 geo-types.workspace = true
 thiserror.workspace = true
 libm.workspace = true
+rstar = "0.12"

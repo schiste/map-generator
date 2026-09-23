@@ -594,6 +594,7 @@ dependencies = [
  "geo",
  "geo-types",
  "libm",
+ "rstar 0.12.2",
  "thiserror 2.0.20",
 ]
 
