@@ -787,10 +787,18 @@ fn run_render(args: RenderArgs) -> Result<()> {
     }
     report_license(&args.data, &args.input);
     if !rendered.outside_frame.is_empty() {
-        eprintln!(
-            "{}",
-            left_out_warning(&rendered.outside_frame, &layers.subject)
-        );
+        if matches!(opts.frame, FrameMode::BBox(_)) {
+            // A frame the user chose: regions outside it are expected.
+            eprintln!(
+                "note: {} region(s) lie outside the chosen frame",
+                rendered.outside_frame.len()
+            );
+        } else {
+            eprintln!(
+                "{}",
+                left_out_warning(&rendered.outside_frame, &layers.subject)
+            );
+        }
     }
     Ok(())
 }
