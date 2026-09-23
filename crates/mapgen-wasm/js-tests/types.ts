@@ -31,6 +31,7 @@ const conic: RenderSpec = {
   outlineWidth: 1.2,
   parentBorderWidth: 1.5,
   leaders: false,
+  borderMode: "regions",
   curvedLabels: true,
   labelMinScale: 0.8,
   snap: 0,

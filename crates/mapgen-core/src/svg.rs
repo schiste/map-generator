@@ -47,6 +47,8 @@ pub struct SvgDocument<'a> {
     /// Emit colours as `var(--mg-<slot>, <colour>)` so a page embedding the
     /// SVG inline can restyle it with CSS custom properties.
     pub css_vars: bool,
+    /// Region fills stroke their own outlines (`BorderMode::Regions`).
+    pub region_strokes: bool,
 }
 
 /// Serialises a map into an SVG document.
@@ -79,7 +81,7 @@ pub fn write_svg(doc: &SvgDocument) -> String {
     let _ = writeln!(
         out,
         "<style>\n{}</style>",
-        stylesheet(doc.theme, doc.css_vars)
+        stylesheet(doc.theme, doc.css_vars, doc.region_strokes)
     );
     let _ = writeln!(
         out,
@@ -197,7 +199,9 @@ fn write_panel(
 }
 
 /// The `<style>` contents: every colour of the map is defined here.
-pub fn stylesheet(theme: &Theme, css_vars: bool) -> String {
+/// With `region_strokes`, region fills carry their own stroke (see
+/// `BorderMode::Regions`).
+pub fn stylesheet(theme: &Theme, css_vars: bool, region_strokes: bool) -> String {
     let c = |slot: &str| {
         let value = theme
             .colors()
@@ -216,14 +220,15 @@ pub fn stylesheet(theme: &Theme, css_vars: bool) -> String {
         "path{{fill-rule:evenodd}}\n\
          .mg-background{{fill:{bg}}}\n\
          .mg-water{{fill:{water}}}\n\
-         .mg-context{{fill:{ctx}}}\n\
-         .mg-land{{fill:{land}}}\n\
+         .mg-context{{fill:{ctx}{ctx_stroke}}}\n\
+         .mg-land{{fill:{land}{land_stroke}}}\n\
          .mg-lake{{fill:{water};stroke:{lakeb};stroke-width:{cbw}}}\n\
          .mg-border{{fill:none;stroke-linejoin:round;stroke-linecap:round}}\n\
          .mg-border-context{{stroke:{ctxb};stroke-width:{cbw}}}\n\
          .mg-border-internal{{stroke:{border};stroke-width:{bw}}}\n\
          .mg-border-parent{{stroke:{border};stroke-width:{pbw}}}\n\
          .mg-border-outline{{stroke:{outline};stroke-width:{ow}}}\n\
+         .mg-border-coast{{stroke:{coast}}}\n\
          .mg-border-disputed{{stroke:{disputed};stroke-width:{dw};stroke-dasharray:{dash1} {dash2}}}\n\
          .mg-label{{fill:{label};font:{ls}px sans-serif;text-anchor:middle;dominant-baseline:central;\
          paint-order:stroke;stroke:{land};stroke-width:2.5px;stroke-linejoin:round}}\n\
@@ -237,6 +242,17 @@ pub fn stylesheet(theme: &Theme, css_vars: bool) -> String {
         land = c("land"),
         border = c("border"),
         outline = c("outline"),
+        coast = c("coast"),
+        ctx_stroke = if region_strokes {
+            format!(";stroke:{};stroke-width:{};stroke-linejoin:round", c("context-border"), n(theme.context_border_width))
+        } else {
+            String::new()
+        },
+        land_stroke = if region_strokes {
+            format!(";stroke:{};stroke-width:{};stroke-linejoin:round", c("border"), n(theme.border_width))
+        } else {
+            String::new()
+        },
         lakeb = c("lake-border"),
         disputed = c("disputed-border"),
         label = c("label"),
@@ -611,9 +627,15 @@ mod tests {
 
     #[test]
     fn css_vars_keep_fallbacks() {
-        let css = stylesheet(&Theme::default(), true);
+        let css = stylesheet(&Theme::default(), true, false);
         assert!(css.contains(".mg-water{fill:var(--mg-water,#c6ecff)}"));
-        let plain = stylesheet(&Theme::default(), false);
+        let plain = stylesheet(&Theme::default(), false, false);
+        assert!(plain.contains(".mg-land{fill:#fefee9}"));
+        assert!(plain.contains(".mg-border-coast{stroke:#0978ab}"));
+        let stroked = stylesheet(&Theme::default(), false, true);
+        assert!(stroked.contains(
+            ".mg-land{fill:#fefee9;stroke:#646464;stroke-width:0.5;stroke-linejoin:round}"
+        ));
         assert!(plain.contains(".mg-water{fill:#c6ecff}"));
     }
 }

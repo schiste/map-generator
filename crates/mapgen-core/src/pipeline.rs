@@ -45,6 +45,19 @@ impl MapLayers {
     }
 }
 
+/// How region borders are drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BorderMode {
+    /// A separate `#borders` layer, each border drawn once and styled by kind;
+    /// region fills have no stroke.
+    #[default]
+    Layer,
+    /// Each region strokes its own outline (shared borders drawn twice, but
+    /// every region is self-contained, e.g. for hover highlighting). Smaller
+    /// files; no coast/land-border distinction.
+    Regions,
+}
+
 /// Whether far-away parts of the mapped area get inset boxes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InsetMode {
@@ -74,6 +87,7 @@ pub struct RenderOptions {
     /// Emit `var(--mg-*, …)` colours for restyling from page CSS.
     pub css_vars: bool,
     pub labels: bool,
+    pub border_mode: BorderMode,
     /// Place labels of small regions outside them, with a leader line.
     pub label_leaders: bool,
     /// Curve labels along long, thin regions.
@@ -112,6 +126,7 @@ impl Default for RenderOptions {
             theme: Theme::default(),
             css_vars: false,
             labels: false,
+            border_mode: BorderMode::Layer,
             label_leaders: true,
             label_curved: true,
             label_min_scale: 0.7,
@@ -289,6 +304,7 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
         credit: opts.credit,
         precision: opts.precision,
         css_vars: opts.css_vars,
+        region_strokes: opts.border_mode == BorderMode::Regions,
     });
     Ok(Rendered {
         svg,

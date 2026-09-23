@@ -11,7 +11,7 @@ const LAKES = NE + "ne_10m_lakes.geojson";
 const DISPUTED = NE + "ne_10m_admin_0_boundary_lines_disputed_areas.geojson";
 const LABELS = {
   background: "Background", water: "Water", land: "Land", "context-land": "Neighbours",
-  border: "Borders", outline: "Outline", "context-border": "Neighbour borders",
+  border: "Borders", outline: "Outline", coast: "Coast", "context-border": "Neighbour borders",
   "lake-border": "Lake shores", "disputed-border": "Disputed", label: "Labels",
 };
 

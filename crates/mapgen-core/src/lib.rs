@@ -29,6 +29,6 @@ pub use error::{Error, Result};
 pub use feature::{MapFeature, MapLine};
 pub use frame::{FrameMode, GeoBBox};
 pub use html::html_page;
-pub use pipeline::{render, InsetInfo, InsetMode, MapLayers, RenderOptions, Rendered};
+pub use pipeline::{render, BorderMode, InsetInfo, InsetMode, MapLayers, RenderOptions, Rendered};
 pub use projection::{MapProjection, Projection, ProjectionChoice};
 pub use theme::{Color, Theme};

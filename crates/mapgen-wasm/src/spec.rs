@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mapgen_core::frame::BBOX_PRESETS;
 use mapgen_core::{
-    render, Color, FrameMode, GeoBBox, InsetMode, MapFeature, MapLayers, MapLine, ProjectionChoice,
-    RenderOptions, Theme,
+    render, BorderMode, Color, FrameMode, GeoBBox, InsetMode, MapFeature, MapLayers, MapLine,
+    ProjectionChoice, RenderOptions, Theme,
 };
 use mapgen_data::{LayerQuery, Source};
 use serde::{Deserialize, Serialize};
@@ -235,6 +235,14 @@ pub enum Projection {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+pub enum Borders {
+    #[default]
+    Layer,
+    Regions,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Insets {
     #[default]
     Auto,
@@ -276,6 +284,10 @@ pub struct RenderSpec {
     pub label_size: Option<f64>,
     #[serde(default)]
     pub labels: bool,
+    /// `layer` (default): borders drawn once in their own layer; `regions`:
+    /// each region strokes its own outline.
+    #[serde(default)]
+    pub border_mode: Borders,
     /// Leader lines for small regions' labels (default true).
     pub leaders: Option<bool>,
     /// Curved labels along long, thin regions (default true).
@@ -351,6 +363,10 @@ impl RenderSpec {
             theme,
             css_vars: self.css_vars || self.format == Format::Html,
             labels: self.labels,
+            border_mode: match self.border_mode {
+                Borders::Layer => BorderMode::Layer,
+                Borders::Regions => BorderMode::Regions,
+            },
             label_leaders: self.leaders.unwrap_or(d.label_leaders),
             label_curved: self.curved_labels.unwrap_or(d.label_curved),
             label_min_scale: positive("labelMinScale", self.label_min_scale)?

@@ -68,7 +68,8 @@ covers no region. Collisions use an R-tree.
 ### 6. Output (`svg.rs`, `html.rs`, `theme.rs`)
 
 Main-map layers, bottom to top: `#background`, `#water`, `#context`, `#context-borders`,
-`#land`, `#lakes`, `#borders` (one path per kind: internal, parent, outline, disputed),
+`#land`, `#lakes`, `#borders` (one path per kind: internal, parent, coast, external — both also
+`mg-border-outline` — or plain outline without a neighbour layer, and disputed),
 `#labels`; then one `g.mg-inset` per inset. Fills have no stroke; every colour and width is
 in the `<style>` block, optionally as `var(--mg-<slot>, …)`.
 

@@ -55,8 +55,12 @@ pub struct Theme {
     /// Borders between the mapped regions (and, thicker, between groups of
     /// them such as the régions of a département map).
     pub border: Color,
-    /// Outer edge of the mapped area: coasts and the borders with neighbours.
+    /// Outer edge of the mapped area: borders with neighbours, and coasts
+    /// unless `coast` says otherwise.
     pub outline: Color,
+    /// Outer edge along the sea (needs a neighbouring-country layer to be
+    /// told apart from land borders).
+    pub coast: Color,
     pub context_border: Color,
     pub lake_border: Color,
     /// Disputed boundary lines, drawn dashed.
@@ -72,13 +76,14 @@ pub struct Theme {
 }
 
 /// Names of the colour slots, as used for CSS custom properties (`--mg-<name>`).
-pub const COLOR_SLOTS: [&str; 10] = [
+pub const COLOR_SLOTS: [&str; 11] = [
     "background",
     "water",
     "land",
     "context-land",
     "border",
     "outline",
+    "coast",
     "context-border",
     "lake-border",
     "disputed-border",
@@ -97,6 +102,7 @@ impl Theme {
             context_land: Color(String::from(ctx)),
             border: Color(String::from(border)),
             outline: Color(String::from(border)),
+            coast: Color(String::from(border)),
             context_border: Color(String::from(ctx_border)),
             lake_border: Color(String::from(lake)),
             disputed_border: Color(String::from(border)),
@@ -109,11 +115,15 @@ impl Theme {
             label_size: 11.0,
         };
         Some(match name {
-            // Wikimedia Commons location-map conventions.
-            "wikimedia" => t(
-                "#ffffff", "#c6ecff", "#fefee9", "#f6e1b9", "#646464", "#a08070", "#0978ab",
-                "#333333",
-            ),
+            // Wikimedia Commons location-map conventions (blue coastlines,
+            // like lake shores).
+            "wikimedia" => Theme {
+                coast: Color(String::from("#0978ab")),
+                ..t(
+                    "#ffffff", "#c6ecff", "#fefee9", "#f6e1b9", "#646464", "#a08070", "#0978ab",
+                    "#333333",
+                )
+            },
             "light" => t(
                 "#ffffff", "#e8eef3", "#ffffff", "#f3f3f1", "#8c96a0", "#d2d6da", "#b8c7d3",
                 "#3c4650",
@@ -150,6 +160,7 @@ impl Theme {
             "context-land" => &mut self.context_land,
             "border" => &mut self.border,
             "outline" => &mut self.outline,
+            "coast" => &mut self.coast,
             "context-border" => &mut self.context_border,
             "lake-border" => &mut self.lake_border,
             "disputed-border" => &mut self.disputed_border,
@@ -166,7 +177,7 @@ impl Theme {
     }
 
     /// `(slot name, colour)` pairs in [`COLOR_SLOTS`] order.
-    pub fn colors(&self) -> [(&'static str, &Color); 10] {
+    pub fn colors(&self) -> [(&'static str, &Color); 11] {
         [
             ("background", &self.background),
             ("water", &self.water),
@@ -174,6 +185,7 @@ impl Theme {
             ("context-land", &self.context_land),
             ("border", &self.border),
             ("outline", &self.outline),
+            ("coast", &self.coast),
             ("context-border", &self.context_border),
             ("lake-border", &self.lake_border),
             ("disputed-border", &self.disputed_border),

@@ -6,8 +6,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use mapgen_core::frame::BBOX_PRESETS;
 use mapgen_core::validate::{self, CheckOptions, IssueKind};
 use mapgen_core::{
-    html_page, render, Color, FrameMode, GeoBBox, InsetMode, MapFeature, MapLayers, MapLine,
-    ProjectionChoice, RenderOptions, Theme,
+    html_page, render, BorderMode, Color, FrameMode, GeoBBox, InsetMode, MapFeature, MapLayers,
+    MapLine, ProjectionChoice, RenderOptions, Theme,
 };
 use mapgen_data::crosswalk::{
     apply_code_table, apply_parent_names, crosswalk, load_reference, ReferenceSpec,
@@ -266,9 +266,13 @@ struct StyleArgs {
     /// Borders between mapped regions.
     #[arg(long)]
     border: Option<Color>,
-    /// Outer edge of the mapped area (coasts, borders with neighbours).
+    /// Outer edge of the mapped area (borders with neighbours; coasts too
+    /// unless --coast is set or the theme has a coast colour).
     #[arg(long)]
     outline: Option<Color>,
+    /// Coastlines (told apart from land borders when --context is given).
+    #[arg(long)]
+    coast: Option<Color>,
     #[arg(long)]
     context_border: Option<Color>,
     #[arg(long)]
@@ -294,6 +298,11 @@ struct StyleArgs {
     /// Draw region names.
     #[arg(long)]
     labels: bool,
+    /// `layer`: every border drawn once, in its own layer, styled by kind.
+    /// `regions`: each region strokes its own outline (self-contained regions,
+    /// e.g. for hover highlighting; smaller files).
+    #[arg(long, value_enum, default_value = "layer")]
+    border_mode: BorderModeArg,
     /// Don't place labels of small regions outside them with leader lines.
     #[arg(long)]
     no_leaders: bool,
@@ -323,6 +332,7 @@ impl StyleArgs {
         set(&mut t.context_land, &self.context_land);
         set(&mut t.border, &self.border);
         set(&mut t.outline, &self.outline);
+        set(&mut t.coast, &self.coast);
         set(&mut t.context_border, &self.context_border);
         set(&mut t.lake_border, &self.lake_border);
         set(&mut t.disputed_border, &self.disputed_border);
@@ -347,6 +357,12 @@ enum FrameArg {
     All,
     /// The whole globe (Equal Earth).
     World,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum BorderModeArg {
+    Layer,
+    Regions,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -541,6 +557,10 @@ fn options(
         theme: style.theme(),
         css_vars: style.css_vars || html,
         labels: style.labels,
+        border_mode: match style.border_mode {
+            BorderModeArg::Layer => BorderMode::Layer,
+            BorderModeArg::Regions => BorderMode::Regions,
+        },
         label_leaders: !style.no_leaders,
         label_curved: !style.no_curved_labels,
         label_min_scale: style.label_min_scale,

@@ -3,10 +3,12 @@
 
 use std::collections::HashSet;
 
+use geo::Contains;
 use geo::{BooleanOps, BoundingRect, Closest, ClosestPoint, CoordsIter, MapCoords, SimplifyVw};
 use geo_types::{
     coord, Coord, Line, LineString, MultiLineString, MultiPolygon, Point, Polygon, Rect,
 };
+use rstar::primitives::{GeomWithData, Rectangle};
 use rstar::RTree;
 
 use crate::antimeridian::{
@@ -16,7 +18,7 @@ use crate::error::{Error, Result};
 use crate::feature::{MapFeature, MapLine};
 use crate::frame::{clip_to_rect, FrameMode};
 use crate::labels::{place_labels, Label, LabelOptions};
-use crate::pipeline::RenderOptions;
+use crate::pipeline::{BorderMode, RenderOptions};
 use crate::projection::{MapProjection, Projection};
 use crate::simplify::{vw_epsilon, BorderArc, Topology};
 use crate::svg::Viewport;
@@ -30,8 +32,13 @@ pub enum BorderKind {
     Internal,
     /// Between mapped regions with different parents (e.g. two régions).
     Parent,
-    /// The outer edge of the mapped area: coasts and borders with neighbours.
+    /// The outer edge of the mapped area, when there is no neighbouring
+    /// layer to tell coasts from land borders.
     Outline,
+    /// Outer edge along the sea.
+    Coast,
+    /// Outer edge along a neighbouring country (a national border).
+    External,
     /// Disputed or claimed boundary lines.
     Disputed,
 }
@@ -43,6 +50,8 @@ impl BorderKind {
             BorderKind::Internal => "mg-border-internal",
             BorderKind::Parent => "mg-border-parent",
             BorderKind::Outline => "mg-border-outline",
+            BorderKind::Coast => "mg-border-outline mg-border-coast",
+            BorderKind::External => "mg-border-outline mg-border-external",
             BorderKind::Disputed => "mg-border-disputed",
         }
     }
@@ -294,21 +303,32 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
         f.geometry = clip(g);
     }
 
-    // 6. Borders, each drawn once.
+    // 6. Borders, each drawn once (unless regions stroke their own outlines).
     let mut by_kind: std::collections::BTreeMap<BorderKind, Vec<LineString<f64>>> =
         Default::default();
-    for arc in context_arcs {
-        by_kind
-            .entry(BorderKind::Context)
-            .or_default()
-            .extend(without_seam(arc.coords, &seam));
-    }
-    for arc in subject_arcs {
-        let kind = classify(&arc, &subject);
-        by_kind
-            .entry(kind)
-            .or_default()
-            .extend(without_seam(arc.coords, &seam));
+    let border_layer = opts.border_mode == BorderMode::Layer;
+    if border_layer {
+        for arc in context_arcs {
+            by_kind
+                .entry(BorderKind::Context)
+                .or_default()
+                .extend(without_seam(arc.coords, &seam));
+        }
+        let sides = (!context.is_empty()).then(|| SideTest::new(&context, 1.5 / viewport.scale));
+        for arc in subject_arcs {
+            let kind = classify(&arc, &subject);
+            let runs = without_seam(arc.coords, &seam);
+            match (kind, &sides, arc.interior_left) {
+                (BorderKind::Outline, Some(sides), Some(left)) => {
+                    for run in runs {
+                        for (k, part) in sides.split(run, left) {
+                            by_kind.entry(k).or_default().push(part);
+                        }
+                    }
+                }
+                _ => by_kind.entry(kind).or_default().extend(runs),
+            }
+        }
     }
     for d in disputed {
         for l in d {
@@ -377,6 +397,79 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
         projection,
         outside_frame,
     })
+}
+
+/// Tells coasts from land borders: the point just outside an outline segment
+/// lies in a neighbouring country for a land border, in the sea for a coast.
+struct SideTest {
+    polys: Vec<Polygon<f64>>,
+    tree: RTree<GeomWithData<Rectangle<[f64; 2]>, usize>>,
+    /// Probe distance from the segment, in projected units.
+    delta: f64,
+}
+
+impl SideTest {
+    fn new(context: &[MapFeature], delta: f64) -> SideTest {
+        let polys: Vec<Polygon<f64>> = context
+            .iter()
+            .flat_map(|f| f.geometry.0.iter().cloned())
+            .collect();
+        let tree = RTree::bulk_load(
+            polys
+                .iter()
+                .enumerate()
+                .filter_map(|(i, p)| p.bounding_rect().map(|b| (i, b)))
+                .map(|(i, b)| {
+                    GeomWithData::new(
+                        Rectangle::from_corners([b.min().x, b.min().y], [b.max().x, b.max().y]),
+                        i,
+                    )
+                })
+                .collect(),
+        );
+        SideTest { polys, tree, delta }
+    }
+
+    fn land_at(&self, x: f64, y: f64) -> bool {
+        let p = Point::new(x, y);
+        self.tree
+            .locate_all_at_point(&[x, y])
+            .any(|hit| self.polys[hit.data].contains(&p))
+    }
+
+    /// Splits an outline run into coast and land-border runs.
+    fn split(
+        &self,
+        line: LineString<f64>,
+        interior_left: bool,
+    ) -> Vec<(BorderKind, LineString<f64>)> {
+        let mut out: Vec<(BorderKind, LineString<f64>)> = Vec::new();
+        for w in line.0.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let (dx, dy) = (b.x - a.x, b.y - a.y);
+            let len = (dx * dx + dy * dy).sqrt();
+            if len == 0.0 {
+                continue;
+            }
+            // Outward normal: right of the walk when the interior is on the left.
+            let (nx, ny) = if interior_left {
+                (dy / len, -dx / len)
+            } else {
+                (-dy / len, dx / len)
+            };
+            let (mx, my) = ((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+            let kind = if self.land_at(mx + self.delta * nx, my + self.delta * ny) {
+                BorderKind::External
+            } else {
+                BorderKind::Coast
+            };
+            match out.last_mut() {
+                Some((k, run)) if *k == kind => run.0.push(b),
+                _ => out.push((kind, LineString(vec![a, b]))),
+            }
+        }
+        out
+    }
 }
 
 fn key(x: f64, y: f64) -> (u64, u64) {
@@ -591,6 +684,34 @@ mod tests {
     }
 
     #[test]
+    fn outline_splits_into_coast_and_land_border() {
+        // Subject square [0,10]²; a neighbour covers x ∈ [10, 20].
+        let neighbour = MapFeature {
+            geometry: sq(10.0, 0.0, 10.0),
+            ..MapFeature::default()
+        };
+        let sides = SideTest::new(&[neighbour], 0.5);
+        // Counter-clockwise walk around the subject: interior on the left.
+        let ring = LineString::from(vec![
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 10.0),
+            (0.0, 10.0),
+            (0.0, 0.0),
+        ]);
+        let parts = sides.split(ring, true);
+        let kinds: Vec<BorderKind> = parts.iter().map(|(k, _)| *k).collect();
+        assert_eq!(
+            kinds,
+            [BorderKind::Coast, BorderKind::External, BorderKind::Coast]
+        );
+        assert_eq!(
+            parts[1].1,
+            LineString::from(vec![(10.0, 0.0), (10.0, 10.0)])
+        );
+    }
+
+    #[test]
     fn border_kinds_follow_parents() {
         let f = |id: &str, parent: Option<&str>| MapFeature {
             id: id.into(),
@@ -609,6 +730,7 @@ mod tests {
             coords: vec![],
             a,
             b,
+            interior_left: None,
         };
         assert_eq!(classify(&arc(0, Some(1)), &subject), BorderKind::Internal);
         assert_eq!(classify(&arc(0, Some(2)), &subject), BorderKind::Parent);

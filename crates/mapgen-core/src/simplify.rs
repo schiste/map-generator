@@ -45,6 +45,9 @@ pub struct BorderArc {
     /// The geometry on the other side, or `None` when the arc is on the
     /// outline of the set (a coast, or the edge of the mapped area).
     pub b: Option<usize>,
+    /// For outline arcs: whether `a`'s interior lies to the left when walking
+    /// `coords` in order (y axis up). Tells which side is the outside.
+    pub interior_left: Option<bool>,
 }
 
 /// Shared-border structure of a set of polygonal geometries.
@@ -148,7 +151,8 @@ impl Topology {
         min_area: f64,
         keep_largest: impl Fn(usize) -> bool,
     ) -> (Vec<MultiPolygon<f64>>, Vec<BorderArc>) {
-        let mut uses: Vec<Vec<usize>> = vec![Vec::new(); self.arcs.len()];
+        // (geometry, is its interior left of the stored arc?) for each use.
+        let mut uses: Vec<Vec<(usize, bool)>> = vec![Vec::new(); self.arcs.len()];
         let mut geoms = Vec::with_capacity(self.plans.len());
         for (gi, (plan, original)) in self.plans.iter().zip(&self.originals).enumerate() {
             // (polygon, its arc refs, area)
@@ -179,9 +183,14 @@ impl Topology {
             let mut kept = Vec::new();
             for (i, (poly, refs, area)) in polys.into_iter().enumerate() {
                 if area >= min_area || (keep && i == largest_idx) {
-                    for r in refs {
-                        for &(arc, _) in r {
-                            uses[arc].push(gi);
+                    let rings = std::iter::once(poly.exterior()).chain(poly.interiors());
+                    for (ri, (r, ring)) in refs.iter().zip(rings).enumerate() {
+                        // The polygon's interior is left of a counter-clockwise
+                        // exterior and right of a counter-clockwise hole.
+                        let ccw = signed_area(ring) > 0.0;
+                        let interior_left = if ri == 0 { ccw } else { !ccw };
+                        for &(arc, reversed) in *r {
+                            uses[arc].push((gi, interior_left != reversed));
                         }
                     }
                     kept.push(poly);
@@ -195,9 +204,10 @@ impl Topology {
             .iter()
             .zip(uses)
             .filter(|(coords, _)| coords.len() >= 2)
-            .filter_map(|(coords, mut users)| {
-                let a = *users.first()?;
-                let total = users.len();
+            .filter_map(|(coords, uses)| {
+                let (a, left) = *uses.first()?;
+                let total = uses.len();
+                let mut users: Vec<usize> = uses.iter().map(|u| u.0).collect();
                 users.sort_unstable();
                 users.dedup();
                 let b = match users.as_slice() {
@@ -212,6 +222,7 @@ impl Topology {
                     coords: coords.clone(),
                     a,
                     b,
+                    interior_left: b.is_none().then_some(left),
                 })
             })
             .collect();
@@ -231,6 +242,15 @@ pub fn simplify_shared(geoms: &[MultiPolygon<f64>], epsilon: f64) -> Vec<MultiPo
     let mut t = Topology::build(geoms);
     t.simplify(epsilon);
     t.finish(0.0, |_| true).0
+}
+
+/// Shoelace area of a closed ring: positive when counter-clockwise.
+fn signed_area(ring: &LineString<f64>) -> f64 {
+    ring.0
+        .windows(2)
+        .map(|w| w[0].x * w[1].y - w[1].x * w[0].y)
+        .sum::<f64>()
+        / 2.0
 }
 
 fn open_ring(ring: &LineString<f64>) -> Vec<Coord<f64>> {
@@ -435,6 +455,31 @@ mod tests {
         assert_eq!(length(shared[0]), 1.0);
         let outline: f64 = borders.iter().filter(|b| b.b.is_none()).map(length).sum();
         assert_eq!(outline, 6.0, "outer perimeter of the 2x1 block");
+    }
+
+    #[test]
+    fn outline_arcs_know_which_side_is_inside() {
+        // Whatever the ring orientation in the input, walking an outline arc
+        // with the interior on the stated side keeps a point inside it.
+        for square in [
+            sq(0.0, 0.0),
+            Polygon::new(
+                sq(0.0, 0.0).exterior().clone().into_iter().rev().collect(),
+                vec![],
+            ),
+        ] {
+            let t = Topology::build(&[MultiPolygon(vec![square.clone()])]);
+            let (_, arcs) = t.finish(0.0, |_| true);
+            for arc in arcs {
+                let left = arc.interior_left.expect("outline arc");
+                let (p, q) = (arc.coords[0], arc.coords[1]);
+                let (mx, my) = ((p.x + q.x) / 2.0, (p.y + q.y) / 2.0);
+                let (nx, ny) = (-(q.y - p.y), q.x - p.x); // left normal
+                let s = if left { 0.01 } else { -0.01 };
+                let probe = geo_types::Point::new(mx + s * nx, my + s * ny);
+                assert!(geo::Contains::contains(&square, &probe));
+            }
+        }
     }
 
     #[test]

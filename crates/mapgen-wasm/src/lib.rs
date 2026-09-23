@@ -45,7 +45,7 @@ export interface LayerSpec {
 
 export type ColorSlot =
   | "background" | "water" | "land" | "earth" | "contextLand"
-  | "border" | "outline" | "contextBorder" | "lakeBorder" | "disputedBorder" | "label";
+  | "border" | "outline" | "coast" | "contextBorder" | "lakeBorder" | "disputedBorder" | "label";
 
 /** Options for one render. Mirrors the CLI flags; everything is optional. */
 export interface RenderSpec {
@@ -70,6 +70,8 @@ export interface RenderSpec {
   disputedBorderWidth?: number;
   labelSize?: number;
   labels?: boolean;
+  /** "layer" (default): borders drawn once, by kind; "regions": each region strokes its outline. */
+  borderMode?: "layer" | "regions";
   /** Label small regions outside them with a leader line (default true). */
   leaders?: boolean;
   /** Curve labels along long, thin regions (default true). */

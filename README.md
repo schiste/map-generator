@@ -64,7 +64,8 @@ Every map has five visual layers, each with its own colour:
 | land | `--land` / `--earth` | The regions being mapped |
 | context-land | `--context-land` | Neighbouring countries |
 | border | `--border` | Borders between mapped regions (width: `--border-width`, `--parent-border-width`) |
-| outline | `--outline` | Outer edge of the mapped area: coasts and borders with neighbours (`--outline-width`) |
+| outline | `--outline` | Outer edge of the mapped area: borders with neighbours (`--outline-width`) |
+| coast | `--coast` | Outer edge along the sea (told apart from land borders when `--context` is given) |
 | context-border, lake-border, disputed-border, label | `--context-border` … | Other strokes and text |
 
 ```sh
@@ -186,7 +187,7 @@ same licence). No dataset is vendored in this repository. See
 
 ## Known limitations and roadmap
 
-- Drawing every border once, as its own layer, makes files about 1.5–2.5× larger than stroking each region's outline (every coordinate appears in a fill and in a border).
+- Drawing every border once, as its own layer, makes files about 1.5–2.5× larger than stroking each region's outline (every coordinate appears in a fill and in a border). `--border-mode regions` gives the per-region strokes back (e.g. France: 218 KB instead of 347 KB), with each region self-contained for hover highlighting, but shared borders drawn twice and no coast/land-border distinction.
 - Labels that fit nowhere, even with a leader line, are dropped (e.g. the small départements around Paris). Label widths are estimated, not measured from a font.
 - `--repair` reliably removes repeated vertices and degenerate rings and rebuilds invalid polygons; snapping near-miss borders is kept only when it reduces them, which on high-resolution geoBoundaries data is rarely the case.
 - EPSG projections (`proj` feature) use the platform's math library, so unlike the built-in projections they are deterministic per platform but not guaranteed identical across platforms.
