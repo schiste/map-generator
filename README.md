@@ -42,6 +42,7 @@ colour the map by country, neighbours included.
 - **Two datasets, one border.** Neighbouring countries from one dataset are snapped onto the outline of regions from another, closing gaps and doubled borders.
 - **Easy restyling.** Four themes plus a flag for every colour. Colours live in one `<style>` block, can be emitted as CSS custom properties, and `.html` output adds live colour pickers.
 - **Data tools.** `mapgen convert` writes indexed GeoPackages (3–4× faster renders) and borrows readable ids (ISO 3166-2, FIPS) by spatial overlap; `mapgen check` finds invalid polygons, slivers, overlaps and near-miss borders, and `--repair` fixes what it safely can. `mapgen match` reports data codes a map lacks (usually data and boundaries from different years), and `mapgen reshape` moves data to new codes through a crosswalk: renames and merges automatically, splits by weight, and anything ambiguous listed for a decision.
+- **Custom maps and recipes.** Any set of countries, or their subdivisions, in one map: in the playground, the API (`/maps/ne-admin0/BEL,LUX,NLD.svg`), or from a [map recipe](docs/recipes.md), a CSV holding the regions and every design setting.
 - **Ready for Commons.** `mapgen batch` names maps from a template and writes an upload manifest (SHA-1, `{{Information}}` fields, licence, categories) and description pages. `scripts/commons-status.py` tells which maps are new, changed or already on Commons, by hash. [docs/commons.md](docs/commons.md) also covers uploading and updating the pages that show a map.
 
 ## Gallery
@@ -192,8 +193,13 @@ gen.setSubject(admin1GeoJson, { dataset: "ne-admin1" });   // parsed once
 const { svg } = gen.render({ region: "FRA", theme: "dark", colors: { water: "#123" } });
 ```
 
-A playground (`crates/mapgen-wasm/www`) loads Natural Earth or your own GeoJSON
-and re-renders as you change region, theme and colours:
+The playground at <https://map-generator.toolforge.org/> (`crates/mapgen-wasm/www`) makes
+custom maps in the browser. You pick countries (search, or click them on the map), either
+whole or as their subdivisions, then set the design: title, labels in any Natural Earth
+language, projection, frame, insets and colours. You can also import a
+[map recipe](docs/recipes.md), a whole map as a `key,value` CSV. Exports are SVG (ready for
+Commons), PNG, the recipe, or a link to the same map from the API. It shares
+[Maphue](https://maphue.toolforge.org/)'s design. To run it locally:
 
 ```sh
 cd crates/mapgen-wasm && npm run build:web && npm run serve   # http://localhost:8080

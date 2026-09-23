@@ -1,79 +1,221 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>map-generator playground</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 rx=%223%22 fill=%22%23c6ecff%22/%3E%3Cpath d=%22M3 11 6 4l3 5 2-2 2 4z%22 fill=%22%23fefee9%22 stroke=%22%23646464%22/%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
-<aside>
-  <header>
-    <h1>map-generator</h1>
-    <p class="muted">Deterministic SVG maps, rendered in your browser with WebAssembly. <span id="version"></span></p>
-  </header>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Make custom maps from open data: pick countries or upload a recipe, design, and export SVG for Wikimedia Commons.">
+    <title>map-generator — custom maps from open data</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 rx=%223%22 fill=%22%23c6ecff%22/%3E%3Cpath d=%22M3 11 6 4l3 5 2-2 2 4z%22 fill=%22%23fefee9%22 stroke=%22%23646464%22/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell theme-light" id="app-shell">
+      <a class="skip-link" href="#workspace-preview">Skip to map preview</a>
 
-  <fieldset>
-    <legend>Data</legend>
-    <label>Sample
-      <select id="sample">
-        <option value="ne-admin1">Natural Earth: states &amp; provinces</option>
-        <option value="ne-admin0">Natural Earth: countries</option>
-      </select>
-    </label>
-    <label class="check"><input type="checkbox" id="with-context" checked> Neighbours, lakes &amp; disputed borders</label>
-    <button id="load-sample" class="primary">Load sample</button>
-    <details>
-      <summary>…or your own GeoJSON</summary>
-      <label>File <input type="file" id="file" accept=".geojson,.json,application/geo+json"></label>
-      <label>Layout
-        <select id="file-dataset">
-          <option value="custom">custom (id, name)</option>
-          <option value="geoboundaries">geoBoundaries</option>
-          <option value="ne-admin1">Natural Earth Admin-1</option>
-          <option value="ne-admin0">Natural Earth Admin-0</option>
-        </select>
-      </label>
-      <label>Credit <input type="text" id="file-credit" placeholder="Source (licence)"></label>
-    </details>
-    <p id="data-status" class="muted" role="status"></p>
-  </fieldset>
+      <header class="top-band">
+        <div class="top-band-title">
+          <div class="app-picker" id="app-picker">
+            <h1>
+              <button class="app-picker-button" id="app-picker-button" type="button" aria-expanded="false" aria-controls="app-picker-menu" aria-label="Choose Wikimedia generator">
+                <span class="app-picker-title">map-generator</span>
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              </button>
+            </h1>
+            <p>Custom maps from open data, for Wikimedia projects <span id="version"></span></p>
+            <div class="app-picker-menu is-hidden" id="app-picker-menu">
+              <a class="app-picker-option app-picker-option-current" href="./" aria-current="page">
+                <span class="app-picker-option-title"><span>map-generator</span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+                <span class="app-picker-option-description">Blank maps of any countries, from open data</span>
+              </a>
+              <a class="app-picker-option" href="https://maphue.toolforge.org/">
+                <span class="app-picker-option-title">Maphue</span>
+                <span class="app-picker-option-description">Interactive world map coloring and data import</span>
+              </a>
+              <a class="app-picker-option" href="https://logo-round-gen.toolforge.org/">
+                <span class="app-picker-option-title">WikiRound Generator</span>
+                <span class="app-picker-option-description">Live Wikimedia logo clusters</span>
+              </a>
+              <a class="app-picker-option" href="https://wikimedia-qr-generator.toolforge.org/">
+                <span class="app-picker-option-title">Wikimedia QR Generator</span>
+                <span class="app-picker-option-description">Codes for movement links and campaign pages</span>
+              </a>
+            </div>
+          </div>
+        </div>
+        <div class="top-band-actions">
+          <a class="header-button" href="https://github.com/schiste/map-generator/blob/main/docs/api.md">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7 3 12l5 5M16 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            <span>API</span>
+          </a>
+          <button class="header-button" id="reset-button" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v6h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            <span>Reset</span>
+          </button>
+          <div class="theme-toggle" role="group" aria-label="Interface theme">
+            <button class="active" id="theme-light" type="button" aria-label="Light interface" aria-pressed="true">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+            </button>
+            <button id="theme-dark" type="button" aria-label="Dark interface" aria-pressed="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 14.7A8.5 8.5 0 0 1 9.3 4 7 7 0 1 0 20 14.7Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>
+            </button>
+          </div>
+        </div>
+      </header>
 
-  <fieldset id="map-options" disabled>
-    <legend>Map</legend>
-    <label>Region <select id="region"></select></label>
-    <label>Frame
-      <select id="frame">
-        <option value="auto">auto (main landmass)</option>
-        <option value="all">all features</option>
-        <option value="world">world</option>
-      </select>
-    </label>
-    <label>Frame preset <select id="bbox"><option value="">none</option></select></label>
-    <label>Width <input type="number" id="width" value="900" min="100" max="4000" step="50"></label>
-    <label>Simplify <input type="range" id="simplify" min="0" max="3" step="0.25" value="0.5"> <output id="simplify-out">0.5 px</output></label>
-    <label class="check"><input type="checkbox" id="labels" checked> Labels</label>
-    <label class="check"><input type="checkbox" id="credit"> Data credit on map</label>
-  </fieldset>
+      <div class="app-body">
+        <aside class="sidebar control-scrollbar" aria-label="Map controls">
+          <div class="sidebar-body controls">
+            <section class="control-section" aria-labelledby="map-heading">
+              <div class="section-heading">
+                <div class="section-title"><span class="status-dot status-dot-amber" aria-hidden="true"></span><h2 id="map-heading">1. Map</h2></div>
+                <span class="section-meta" id="data-status">Natural Earth 1:10m</span>
+              </div>
+              <p class="section-note">Draw whole countries, or the states, provinces and départements of the countries you pick. Neighbours, lakes and disputed borders are drawn around them.</p>
+              <div class="scope-switcher" role="group" aria-label="What to draw">
+                <button class="is-active" type="button" data-mode="countries" aria-pressed="true">Countries</button>
+                <button type="button" data-mode="subdivisions" aria-pressed="false">Subdivisions</button>
+              </div>
+            </section>
 
-  <fieldset id="style-options" disabled>
-    <legend>Colours</legend>
-    <label>Theme <select id="theme"></select></label>
-    <div id="colors"></div>
-  </fieldset>
-</aside>
+            <section class="control-section" aria-labelledby="countries-heading">
+              <div class="section-heading">
+                <div class="section-title"><span class="status-dot" aria-hidden="true"></span><h2 id="countries-heading">2. Countries</h2></div>
+                <span class="section-meta" id="selected-count">none selected</span>
+              </div>
+              <p class="section-note">Search by name, ISO-2 or ISO-3, or click countries on the map to add or remove them.</p>
+              <div class="selected-chips" id="selected-chips" aria-live="polite"></div>
+              <label class="search-field field" for="country-search">
+                <span>Find a country</span>
+                <span class="search-input">
+                  <svg aria-hidden="true" viewBox="0 0 20 20"><path d="m14.5 14.5 4 4m-2-10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"></path></svg>
+                  <input id="country-search" type="search" placeholder="France, FR, or FRA" autocomplete="off" disabled>
+                </span>
+              </label>
+              <div class="country-list" id="country-list" role="group" aria-label="Countries"></div>
+              <p class="empty-state" id="country-empty" hidden>No matching countries.</p>
+              <div class="import-actions">
+                <button class="secondary-action" id="clear-selection" type="button" disabled><span>Clear selection</span></button>
+              </div>
+            </section>
 
-<main>
-  <div class="toolbar">
-    <p id="info" class="muted" aria-live="polite">Load a sample to start.</p>
-    <span id="hover" class="muted"></span>
-    <button id="download" disabled>Download SVG</button>
-  </div>
-  <div id="map" aria-label="Rendered map"></div>
-  <p id="error" role="alert"></p>
-</main>
+            <section class="control-section" aria-labelledby="design-heading">
+              <div class="section-heading">
+                <div class="section-title"><span class="status-dot status-dot-green" aria-hidden="true"></span><h2 id="design-heading">3. Design</h2></div>
+                <label class="section-meta section-select"><span class="sr-only">Theme</span><select id="theme" aria-label="Theme"></select></label>
+              </div>
+              <div class="field-group">
+                <label class="field"><span>Title</span><input id="title" type="text" maxlength="200" placeholder="Optional"></label>
+                <label class="field"><span>Width (px)</span><input id="width" type="number" min="100" max="4000" step="50" value="1000"></label>
+              </div>
+              <label class="toggle-row" for="labels">
+                <span><strong>Labels</strong><small>Region names, placed to fit</small></span>
+                <input id="labels" type="checkbox"><span class="toggle-control" aria-hidden="true"></span>
+              </label>
+              <div class="field-group">
+                <label class="field"><span>Label languages</span><input id="languages" type="text" placeholder="fr, ar, zh-Hans" spellcheck="false" list="language-list"></label>
+                <label class="field"><span>For</span>
+                  <select id="target"><option value="commons">Wikimedia Commons</option><option value="web">Web pages</option></select>
+                </label>
+              </div>
+              <div class="field-group">
+                <label class="field"><span>Projection</span>
+                  <select id="projection"><option value="auto">Automatic</option><option value="laea">Lambert equal-area</option><option value="equal-earth">Equal Earth</option><option value="albers">Albers conic</option><option value="lcc">Lambert conformal conic</option></select>
+                </label>
+                <label class="field"><span>Frame</span>
+                  <select id="frame"><option value="auto">Main landmass</option><option value="all">Everything</option><option value="world">World</option></select>
+                </label>
+              </div>
+              <label class="toggle-row" for="insets">
+                <span><strong>Insets</strong><small>Far-away parts in corner boxes</small></span>
+                <input id="insets" type="checkbox" checked><span class="toggle-control" aria-hidden="true"></span>
+              </label>
+              <label class="toggle-row" for="credit">
+                <span><strong>Data credit on the map</strong><small>Also always embedded in the file</small></span>
+                <input id="credit" type="checkbox"><span class="toggle-control" aria-hidden="true"></span>
+              </label>
+              <div class="annotation-subsection">
+                <div class="subsection-heading"><strong>Colours</strong><span>Any CSS colour</span></div>
+                <div class="color-grid" id="colors"></div>
+              </div>
+              <p class="section-note" id="extra-settings" hidden></p>
+              <datalist id="language-list">
+                <option value="ar">Arabic</option><option value="bn">Bengali</option><option value="de">German</option><option value="el">Greek</option><option value="en">English</option><option value="es">Spanish</option><option value="fa">Persian</option><option value="fr">French</option><option value="he">Hebrew</option><option value="hi">Hindi</option><option value="hu">Hungarian</option><option value="id">Indonesian</option><option value="it">Italian</option><option value="ja">Japanese</option><option value="ko">Korean</option><option value="nl">Dutch</option><option value="pl">Polish</option><option value="pt">Portuguese</option><option value="ru">Russian</option><option value="sv">Swedish</option><option value="tr">Turkish</option><option value="uk">Ukrainian</option><option value="ur">Urdu</option><option value="vi">Vietnamese</option><option value="zh-Hans">Chinese (simplified)</option><option value="zh-Hant">Chinese (traditional)</option>
+              </datalist>
+            </section>
 
-<script type="module" src="app.js"></script>
-</body>
+            <section class="control-section" aria-labelledby="recipe-heading">
+              <div class="section-heading">
+                <div class="section-title"><span class="status-dot status-dot-red" aria-hidden="true"></span><h2 id="recipe-heading">4. Recipe</h2></div>
+                <span class="section-meta">CSV</span>
+              </div>
+              <p class="section-note">A recipe is the whole map in a <code>key,value</code> CSV: <code>dataset</code>, one <code>region</code> row per country (code or name), and any setting (<code>title</code>, <code>width</code>, <code>theme</code>, <code>labels</code>, <code>color-water</code>…). A plain list of countries works too. <a href="https://github.com/schiste/map-generator/blob/main/docs/recipes.md">Format</a></p>
+              <label class="field" for="recipe-text">
+                <span>Recipe</span>
+                <textarea id="recipe-text" rows="8" spellcheck="false" placeholder="key,value&#10;dataset,countries&#10;region,Belgium&#10;region,NLD&#10;region,LU&#10;title,Benelux&#10;labels,true&#10;color-water,#c6ecff"></textarea>
+              </label>
+              <input id="recipe-file" type="file" accept=".csv,text/csv,text/plain" hidden>
+              <div class="import-actions">
+                <button class="secondary-action" id="choose-recipe" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0-12 4 4m-4-4L8 7M4 14v5h16v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                  <span>Choose CSV</span>
+                </button>
+                <button class="primary-action" id="apply-recipe" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                  <span>Apply recipe</span>
+                </button>
+              </div>
+              <output class="import-report" id="recipe-report" hidden></output>
+            </section>
+          </div>
+        </aside>
+
+        <main class="workspace" id="workspace-preview" tabindex="-1" aria-label="Map preview and export">
+          <div class="workspace-toolbar">
+            <div>
+              <span class="toolbar-label" id="toolbar-label">Countries · Natural Earth</span>
+              <strong class="workspace-title" id="toolbar-title">Click countries to build your map</strong>
+            </div>
+            <div class="workspace-toolbar-actions">
+              <span class="qr-meta" id="render-meta">—</span>
+              <span class="shortcut-help"><kbd>Click</kbd> adds or removes</span>
+            </div>
+          </div>
+          <div class="canvas-stage">
+            <div class="canvas-frame map-frame" id="map-frame">
+              <div class="map-loading" id="map-loading">
+                <span class="loader" aria-hidden="true"></span>
+                <span id="loading-text">Loading map data…</span>
+              </div>
+              <div class="map-container" id="map-container" role="img" aria-label="Map"></div>
+              <output class="map-tooltip" id="map-tooltip" hidden></output>
+            </div>
+          </div>
+          <div class="export-bar">
+            <div class="export-info">
+              <strong>Export your map</strong>
+              <span id="export-note">SVG for Wikimedia Commons, PNG, the recipe, or a link to the same map from the API.</span>
+            </div>
+            <div class="export-actions">
+              <button class="secondary-action" id="download-recipe" type="button" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h10l4 4v14H5zM15 3v5h5M8 13h8M8 17h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>
+                <span>Recipe</span>
+              </button>
+              <button class="secondary-action" id="copy-api" type="button" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+                <span>API link</span>
+              </button>
+              <button class="secondary-action" id="download-png" type="button" disabled><span>PNG</span></button>
+              <button class="primary-action" id="download-svg" type="button" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                <span>Download SVG</span>
+              </button>
+            </div>
+          </div>
+        </main>
+      </div>
+      <output class="toast" id="toast" hidden></output>
+    </div>
+    <script type="module" src="app.js"></script>
+  </body>
 </html>
