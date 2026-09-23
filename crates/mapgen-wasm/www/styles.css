@@ -1579,9 +1579,18 @@ dialog p {
 .map-container .mg-lake,
 .map-container .mg-leader,
 .map-container text,
-.map-container .mg-inset-frame,
-.map-container .mg-disputed-area {
+.map-container .mg-inset-frame {
   pointer-events: none;
+}
+
+/* Contested areas keep their tooltip (who administers, who claims);
+   a click selects the country underneath. */
+.map-container .mg-disputed-area {
+  cursor: pointer;
+}
+
+.map-container .mg-disputed-area:hover {
+  stroke-width: 2px;
 }
 
 /* Four exports on one row; the map sized from the room actually left. */
@@ -1634,4 +1643,78 @@ dialog p {
     max-width: 100%;
     white-space: normal;
   }
+}
+
+/* The sidebar clips its own content: its screen-reader-only labels are
+   absolutely positioned and would otherwise stretch the page (a grey band
+   below the app in Chrome). */
+.sidebar {
+  position: relative;
+}
+
+/* Zoom and pan. */
+.map-frame {
+  overflow: hidden;
+  touch-action: none;
+  outline-offset: -3px;
+}
+
+.map-container {
+  transform-origin: 0 0;
+  transition: opacity 450ms ease;
+  will-change: transform;
+}
+
+.map-frame.is-zoomed {
+  cursor: grab;
+}
+
+.map-frame.is-dragging,
+.map-frame.is-dragging path {
+  cursor: grabbing !important;
+}
+
+.zoom-controls {
+  position: absolute;
+  z-index: 5;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgb(2 6 23 / 16%);
+}
+
+.zoom-controls button {
+  display: grid;
+  width: 34px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+}
+
+.zoom-controls button:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.zoom-controls svg {
+  width: 17px;
+  height: 17px;
+}
+
+.zoom-controls output {
+  width: 100%;
+  padding: 3px 0;
+  border-block: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  text-align: center;
 }

@@ -50,6 +50,10 @@ let byIso2 = new Map();
 let lastOutput = null;
 let pending = 0;
 let toastTimer = 0;
+/** Zoom and pan of the map on screen (CSS transform, origin top-left). */
+const view = { scale: 1, x: 0, y: 0, key: "" };
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 20;
 const probe = document.createElement("canvas").getContext("2d");
 
 await init();
@@ -285,6 +289,12 @@ async function renderNow() {
   const container = $("map-container");
   $("map-tooltip").hidden = true;
   container.innerHTML = out.svg;
+  // A different map (selection, size) starts fitted; a restyle keeps the zoom.
+  const key = `${picking}|${state.mode}|${state.selected.join()}|${out.width}x${out.height}`;
+  if (key !== view.key) {
+    view.key = key;
+    fitView();
+  }
   container.classList.add("is-ready");
   container.classList.toggle("is-picking", picking);
   $("map-frame").style.aspectRatio = `${out.width} / ${out.height}`;
@@ -425,10 +435,15 @@ function bindControls() {
 
   const map = $("map-container");
   map.addEventListener("click", (e) => {
-    const p = e.target.closest("path[data-code]");
+    if (drag.moved) return; // the end of a pan, not a click
+    // Contested areas lie over the countries: select what's underneath.
+    const p = document
+      .elementsFromPoint(e.clientX, e.clientY)
+      .find((el) => el.matches?.("path.mg-land[data-code], path.mg-context[data-code]"));
     const code = p && countryOf(p);
     if (code && countryList.some((c) => c.code === code)) toggleCountry(code);
   });
+  bindZoom();
   map.addEventListener("mousemove", (e) => {
     const p = e.target.closest("path[data-name]");
     const tip = $("map-tooltip");
@@ -469,6 +484,152 @@ function bindControls() {
     renderCountryList();
     render();
   });
+}
+
+// ---------------------------------------------------------------- zoom & pan
+
+const drag = { id: null, x: 0, y: 0, moved: false, pointers: new Map(), pinch: 0 };
+
+function applyView() {
+  const c = $("map-container");
+  c.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+  $("zoom-level").textContent = `${Math.round(view.scale * 100)}%`;
+  $("zoom-out").disabled = view.scale <= ZOOM_MIN;
+  $("zoom-fit").disabled = view.scale <= ZOOM_MIN;
+  $("zoom-in").disabled = view.scale >= ZOOM_MAX;
+  $("map-frame").classList.toggle("is-zoomed", view.scale > ZOOM_MIN);
+}
+
+function fitView() {
+  view.scale = 1;
+  view.x = view.y = 0;
+  applyView();
+}
+
+/** Keeps the map covering the frame: no empty margins when zoomed in. */
+function clampView() {
+  const c = $("map-container");
+  const w = c.offsetWidth;
+  const h = c.offsetHeight;
+  view.x = Math.min(0, Math.max(w - w * view.scale, view.x));
+  view.y = Math.min(0, Math.max(h - h * view.scale, view.y));
+}
+
+/** Zooms by `factor`, keeping the map point under (clientX, clientY) in place. */
+function zoomAt(factor, clientX, clientY) {
+  const c = $("map-container");
+  const box = c.getBoundingClientRect();
+  const left = box.left - view.x;
+  const top = box.top - view.y;
+  const px = (clientX - box.left) / view.scale;
+  const py = (clientY - box.top) / view.scale;
+  const scale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, view.scale * factor));
+  view.x = clientX - left - px * scale;
+  view.y = clientY - top - py * scale;
+  view.scale = scale;
+  clampView();
+  applyView();
+}
+
+function zoomCentre(factor) {
+  const r = $("map-container").getBoundingClientRect();
+  const f = $("map-frame").getBoundingClientRect();
+  // The centre of the visible part of the map.
+  const cx = (Math.max(r.left, f.left) + Math.min(r.right, f.right)) / 2;
+  const cy = (Math.max(r.top, f.top) + Math.min(r.bottom, f.bottom)) / 2;
+  zoomAt(factor, cx, cy);
+}
+
+function bindZoom() {
+  const frame = $("map-frame");
+  $("zoom-in").addEventListener("click", () => zoomCentre(1.6));
+  $("zoom-out").addEventListener("click", () => zoomCentre(1 / 1.6));
+  $("zoom-fit").addEventListener("click", fitView);
+
+  // Wheel and trackpad pinch (which comes as a wheel event with ctrlKey).
+  frame.addEventListener("wheel", (e) => {
+    if (!$("map-container").firstElementChild) return;
+    e.preventDefault();
+    const speed = e.ctrlKey ? 0.01 : 0.0018;
+    zoomAt(Math.exp(-e.deltaY * speed), e.clientX, e.clientY);
+  }, { passive: false });
+
+  // Drag to pan, two fingers to pinch. A drag of more than a few pixels is
+  // not a click, so panning never toggles a country.
+  frame.addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".zoom-controls") || e.button > 0) return;
+    drag.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    drag.moved = false;
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+    if (drag.pointers.size === 2) drag.pinch = pinchDistance();
+  });
+  frame.addEventListener("pointermove", (e) => {
+    const p = drag.pointers.get(e.pointerId);
+    if (!p) return;
+    const dx = e.clientX - p.x;
+    const dy = e.clientY - p.y;
+    p.x = e.clientX;
+    p.y = e.clientY;
+    if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 4) {
+      drag.moved = true;
+      frame.setPointerCapture(e.pointerId);
+      frame.classList.add("is-dragging");
+    }
+    if (!drag.moved) return;
+    if (drag.pointers.size === 2) {
+      const d = pinchDistance();
+      const [a, b] = [...drag.pointers.values()];
+      if (drag.pinch > 0) zoomAt(d / drag.pinch, (a.x + b.x) / 2, (a.y + b.y) / 2);
+      drag.pinch = d;
+    } else if (view.scale > ZOOM_MIN) {
+      view.x += dx;
+      view.y += dy;
+      clampView();
+      applyView();
+    }
+  });
+  const end = (e) => {
+    drag.pointers.delete(e.pointerId);
+    if (drag.pointers.size < 2) drag.pinch = 0;
+    if (drag.pointers.size === 0) {
+      frame.classList.remove("is-dragging");
+      // The click that follows a drag must not count: clear after it.
+      setTimeout(() => (drag.moved = false), 0);
+    }
+  };
+  frame.addEventListener("pointerup", end);
+  frame.addEventListener("pointercancel", end);
+
+  frame.addEventListener("keydown", (e) => {
+    const step = 60;
+    const keys = {
+      "+": () => zoomCentre(1.6), "=": () => zoomCentre(1.6), "-": () => zoomCentre(1 / 1.6),
+      "0": fitView,
+      ArrowLeft: () => pan(step, 0), ArrowRight: () => pan(-step, 0),
+      ArrowUp: () => pan(0, step), ArrowDown: () => pan(0, -step),
+    };
+    if (keys[e.key]) {
+      e.preventDefault();
+      keys[e.key]();
+    }
+  });
+  new ResizeObserver(() => {
+    clampView();
+    applyView();
+  }).observe(frame);
+}
+
+function pan(dx, dy) {
+  view.x += dx;
+  view.y += dy;
+  clampView();
+  applyView();
+}
+
+function pinchDistance() {
+  const [a, b] = [...drag.pointers.values()];
+  return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
 }
 
 // ---------------------------------------------------------------- interface theme & storage

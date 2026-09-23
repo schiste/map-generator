@@ -178,17 +178,29 @@
             </div>
             <div class="workspace-toolbar-actions">
               <span class="qr-meta" id="render-meta">—</span>
-              <span class="shortcut-help"><kbd>Click</kbd> adds or removes</span>
+              <span class="shortcut-help"><kbd>Click</kbd> adds or removes · <kbd>Scroll</kbd> zooms</span>
             </div>
           </div>
           <div class="canvas-stage">
-            <div class="canvas-frame map-frame" id="map-frame">
+            <div class="canvas-frame map-frame" id="map-frame" tabindex="0" aria-label="Map: scroll or pinch to zoom, drag to move, + and − keys, 0 to fit">
               <div class="map-loading" id="map-loading">
                 <span class="loader" aria-hidden="true"></span>
                 <span id="loading-text">Loading map data…</span>
               </div>
               <div class="map-container" id="map-container" role="img" aria-label="Map"></div>
               <output class="map-tooltip" id="map-tooltip" hidden></output>
+              <div class="zoom-controls" role="group" aria-label="Zoom">
+                <button id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+                </button>
+                <output id="zoom-level" aria-live="polite">100%</output>
+                <button id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)" disabled>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+                </button>
+                <button id="zoom-fit" type="button" aria-label="Fit the whole map" title="Fit (0)" disabled>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                </button>
+              </div>
             </div>
           </div>
           <div class="export-bar">
