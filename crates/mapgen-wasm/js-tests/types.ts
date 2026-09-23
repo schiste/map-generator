@@ -10,6 +10,8 @@ gen.setContext("{}");
 gen.setLakes("{}", { dataset: "ne-lakes" });
 gen.setDisputed("{}", { dataset: "ne-disputed" });
 gen.setDisputed();
+gen.setDisputedAreas("{}", { dataset: "ne-disputed-areas" });
+gen.setSubject("{}", { dataset: "ne-admin0", worldview: "IND" });
 gen.setSubject("{}", { dataset: "geoboundaries", parentProperty: "parent" });
 gen.setSubject("{}", { parentNameProperty: "state", countryProperty: "iso3" });
 

@@ -30,6 +30,8 @@ pub struct MapLayers {
     pub context: Vec<MapFeature>,
     /// Lakes, drawn in `water` colour above the land.
     pub lakes: Vec<MapFeature>,
+    /// Disputed areas (e.g. Natural Earth's), drawn hatched.
+    pub disputed_areas: Vec<MapFeature>,
     /// Disputed or claimed boundaries, drawn dashed.
     pub disputed: Vec<MapLine>,
 }
@@ -181,6 +183,7 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
     let subject = sorted(&layers.subject, |f| &f.id);
     let context = sorted(&layers.context, |f| &f.id);
     let lakes = sorted(&layers.lakes, |f| &f.id);
+    let disputed_areas = sorted(&layers.disputed_areas, |f| &f.id);
     let disputed = sorted(&layers.disputed, |l| &l.id);
 
     // Frame planning: the main cluster, plus far-away clusters for insets.
@@ -224,6 +227,7 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
         subject: restrict(&subject, &polys, |i| !in_inset.contains(&i)),
         context: &context,
         lakes: &lakes,
+        disputed_areas: &disputed_areas,
         disputed: &disputed,
         anchor,
         frame_mode: opts.frame,
@@ -271,6 +275,7 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
             subject: restrict(&subject, &polys, |i| members.contains(&i)),
             context: &context,
             lakes: &lakes,
+            disputed_areas: &disputed_areas,
             disputed: &disputed,
             anchor: Some(anchor),
             frame_mode: FrameMode::Auto,

@@ -65,6 +65,8 @@ pub struct Panel {
     pub context: Vec<MapFeature>,
     pub subject: Vec<MapFeature>,
     pub lakes: Vec<MapFeature>,
+    /// Disputed areas (hatched).
+    pub disputed_areas: Vec<MapFeature>,
     pub borders: Vec<(BorderKind, MultiLineString<f64>)>,
     /// In pixels.
     pub labels: Vec<Label>,
@@ -88,6 +90,7 @@ pub(crate) struct PanelSpec<'a> {
     pub subject: Vec<MapFeature>,
     pub context: &'a [MapFeature],
     pub lakes: &'a [MapFeature],
+    pub disputed_areas: &'a [MapFeature],
     pub disputed: &'a [MapLine],
     /// Lon/lat geometry whose extent is the frame; `None` for the whole globe.
     pub anchor: Option<MultiPolygon<f64>>,
@@ -152,6 +155,7 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
         mut subject,
         context,
         lakes,
+        disputed_areas,
         disputed,
         anchor,
         frame_mode,
@@ -174,6 +178,11 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
         .cloned()
         .collect();
     let mut lakes: Vec<MapFeature> = lakes
+        .iter()
+        .filter(|f| near(f.geometry.bounding_rect()))
+        .cloned()
+        .collect();
+    let mut disputed_areas: Vec<MapFeature> = disputed_areas
         .iter()
         .filter(|f| near(f.geometry.bounding_rect()))
         .cloned()
@@ -218,6 +227,7 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
         .iter_mut()
         .chain(context.iter_mut())
         .chain(lakes.iter_mut())
+        .chain(disputed_areas.iter_mut())
     {
         f.geometry = prepare(&f.geometry);
     }
@@ -283,10 +293,13 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
     }
     let mut lakes_topo = Topology::build(&geoms(&lakes));
     lakes_topo.simplify(eps);
+    let mut disputed_topo = Topology::build(&geoms(&disputed_areas));
+    disputed_topo.simplify(eps);
 
     let (subject_geoms, subject_arcs) = subject_topo.finish(min_area, |_| true);
     let (context_geoms, context_arcs) = context_topo.finish(min_area, |_| false);
     let (lake_geoms, _) = lakes_topo.finish(min_area, |_| false);
+    let (disputed_geoms, _) = disputed_topo.finish(min_area, |_| false);
 
     // 5. Clip to the frame.
     let clip = |g: MultiPolygon<f64>| match frame {
@@ -300,6 +313,9 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
         f.geometry = clip(g);
     }
     for (f, g) in lakes.iter_mut().zip(lake_geoms) {
+        f.geometry = clip(g);
+    }
+    for (f, g) in disputed_areas.iter_mut().zip(disputed_geoms) {
         f.geometry = clip(g);
     }
 
@@ -350,6 +366,7 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
     subject.retain(|f| !f.geometry.0.is_empty());
     context.retain(|f| !f.geometry.0.is_empty());
     lakes.retain(|f| !f.geometry.0.is_empty());
+    disputed_areas.retain(|f| !f.geometry.0.is_empty());
 
     // 7. Labels, in pixels.
     let labels = if opts.labels {
@@ -388,6 +405,7 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
         context,
         subject,
         lakes,
+        disputed_areas,
         borders,
         labels,
         inset_box: match placement {

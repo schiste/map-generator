@@ -94,6 +94,13 @@ pub fn write_svg(doc: &SvgDocument) -> String {
         "<style>\n{}</style>",
         stylesheet(doc.theme, doc.css_vars, doc.region_strokes)
     );
+    if doc.panels.iter().any(|p| !p.disputed_areas.is_empty()) {
+        // Hatching for disputed areas; the line colour comes from `.mg-hatch`.
+        out.push_str(
+            "<defs><pattern id=\"mg-hatch\" width=\"6\" height=\"6\" patternUnits=\"userSpaceOnUse\" \
+             patternTransform=\"rotate(45)\"><path class=\"mg-hatch\" d=\"M0 0L0 6\"/></pattern></defs>\n",
+        );
+    }
     let _ = writeln!(
         out,
         "<rect id=\"background\" class=\"mg-background\" width=\"{w}\" height=\"{h}\"/>"
@@ -178,6 +185,16 @@ fn write_panel(
         vp,
         p,
     );
+    write_layer(
+        out,
+        ids,
+        &group("disputed-areas"),
+        "mg-disputed-area",
+        "disputed-",
+        &panel.disputed_areas,
+        vp,
+        p,
+    );
     write_borders(
         out,
         &group("borders"),
@@ -241,6 +258,8 @@ pub fn stylesheet(theme: &Theme, css_vars: bool, region_strokes: bool) -> String
          .mg-border-outline{{stroke:{outline};stroke-width:{ow}}}\n\
          .mg-border-coast{{stroke:{coast}}}\n\
          .mg-border-disputed{{stroke:{disputed};stroke-width:{dw};stroke-dasharray:{dash1} {dash2}}}\n\
+         .mg-disputed-area{{fill:url(#mg-hatch);stroke:{disputed};stroke-width:{dw};stroke-dasharray:{dash1} {dash2}}}\n\
+         .mg-hatch{{stroke:{disputed};stroke-width:1}}\n\
          .mg-label{{fill:{label};font:{ls}px sans-serif;text-anchor:middle;dominant-baseline:central;\
          paint-order:stroke;stroke:{land};stroke-width:2.5px;stroke-linejoin:round}}\n\
          .mg-leader{{fill:none;stroke:{label};stroke-width:0.6}}\n\

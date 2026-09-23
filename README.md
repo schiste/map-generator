@@ -113,6 +113,11 @@ mapgen render -i data/ne_10m_admin_0.geojson --dataset ne-admin0 --continent Eur
 mapgen render -i data/ne_10m_admin_0.geojson --dataset ne-admin0 --bbox=-20,25,60,72 -o box.svg
 mapgen render -i data/ne_10m_admin_0.geojson --dataset ne-admin0 --frame world --center-lon 150 -o pacific.svg
 
+# Disputed borders: Natural Earth's point of view for a country, disputed areas hatched
+scripts/fetch-data.sh ne-worldview IND
+mapgen render … --context data/ne_10m_admin_0.geojson --worldview IND \
+    --disputed-areas data/ne_10m_disputed_areas.geojson     # credit: "Natural Earth (IND view)"
+
 # Check and repair input data
 mapgen check -i data/geoboundaries/AUT-ADM2.geojson --dataset geoboundaries
 mapgen convert -i data/geoboundaries/AUT-ADM2.geojson --dataset geoboundaries --repair -o aut.gpkg

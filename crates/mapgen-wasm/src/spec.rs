@@ -41,6 +41,8 @@ pub enum Dataset {
     NeLakes,
     /// Natural Earth disputed and claimed boundary lines.
     NeDisputed,
+    /// Natural Earth disputed areas (polygons).
+    NeDisputedAreas,
     Geoboundaries,
 }
 
@@ -63,8 +65,12 @@ pub struct LayerSpec {
     /// a lowercase alpha-2 class for colouring tools like Maphue.
     pub country_property: Option<String>,
     /// Data credit for this layer. Natural Earth presets default to
-    /// "Natural Earth"; for geoBoundaries, pass the source and licence.
+    /// "Natural Earth (de facto view)"; for geoBoundaries, pass the source
+    /// and licence.
     pub attribution: Option<String>,
+    /// For Natural Earth point-of-view files (`ne_10m_admin_0_countries_ind`):
+    /// the view, named in the credit ("Natural Earth (IND view)").
+    pub worldview: Option<String>,
 }
 
 impl LayerSpec {
@@ -88,6 +94,7 @@ impl LayerSpec {
             Dataset::NeAdmin1 => Source::NaturalEarthAdmin1.layer_query(),
             Dataset::NeLakes => Source::NaturalEarthLakes.layer_query(),
             Dataset::NeDisputed => Source::NaturalEarthDisputedLines.layer_query(),
+            Dataset::NeDisputedAreas => Source::NaturalEarthDisputedAreas.layer_query(),
             Dataset::Geoboundaries => Source::GeoBoundaries.layer_query(),
         };
         if let Some(p) = &self.id_property {
@@ -131,9 +138,13 @@ impl LoadedLayer {
         let credit = spec.attribution.clone().or_else(|| {
             matches!(
                 spec.dataset,
-                Dataset::NeAdmin0 | Dataset::NeAdmin1 | Dataset::NeLakes | Dataset::NeDisputed
+                Dataset::NeAdmin0
+                    | Dataset::NeAdmin1
+                    | Dataset::NeLakes
+                    | Dataset::NeDisputed
+                    | Dataset::NeDisputedAreas
             )
-            .then(|| "Natural Earth".to_owned())
+            .then(|| natural_earth_credit(spec))
         });
         Ok(LoadedLayer {
             rows,
@@ -183,6 +194,14 @@ impl LoadedLayer {
     }
 }
 
+/// "Natural Earth (de facto view)", or the layer's point of view.
+fn natural_earth_credit(spec: &LayerSpec) -> String {
+    match &spec.worldview {
+        Some(v) => format!("Natural Earth ({} view)", v.to_ascii_uppercase()),
+        None => "Natural Earth (de facto view)".to_owned(),
+    }
+}
+
 /// A parsed line layer (disputed boundaries).
 #[derive(Debug, Clone, Default)]
 pub struct LoadedLines {
@@ -200,7 +219,7 @@ impl LoadedLines {
         let credit = spec
             .attribution
             .clone()
-            .or_else(|| natural_earth.then(|| "Natural Earth".to_owned()));
+            .or_else(|| natural_earth.then(|| natural_earth_credit(spec)));
         Ok(LoadedLines { lines, credit })
     }
 
@@ -459,6 +478,7 @@ pub struct Sources<'a> {
     pub subject: &'a LoadedLayer,
     pub context: Option<&'a LoadedLayer>,
     pub lakes: Option<&'a LoadedLayer>,
+    pub disputed_areas: Option<&'a LoadedLayer>,
     pub disputed: Option<&'a LoadedLines>,
 }
 
@@ -466,9 +486,14 @@ impl Sources<'_> {
     /// Distinct layer credits, in subject/context/lakes order.
     fn credits(&self) -> Option<String> {
         let mut out: Vec<&str> = Vec::new();
-        let layers = [Some(self.subject), self.context, self.lakes]
-            .into_iter()
-            .flatten();
+        let layers = [
+            Some(self.subject),
+            self.context,
+            self.lakes,
+            self.disputed_areas,
+        ]
+        .into_iter()
+        .flatten();
         let credits = layers.map(|l| l.credit.as_deref()).chain(std::iter::once(
             self.disputed.and_then(|d| d.credit.as_deref()),
         ));
@@ -491,6 +516,7 @@ pub fn render_map(src: Sources, spec: &RenderSpec) -> Result<MapOutput> {
         subject: src.subject.select(region)?,
         context: src.context.map(LoadedLayer::all).unwrap_or_default(),
         lakes: src.lakes.map(LoadedLayer::all).unwrap_or_default(),
+        disputed_areas: src.disputed_areas.map(LoadedLayer::all).unwrap_or_default(),
         disputed: src.disputed.map(|d| d.lines.clone()).unwrap_or_default(),
     };
     layers.exclude_subject_from_context(region);
@@ -567,6 +593,7 @@ mod tests {
                 subject: &layer,
                 context: None,
                 lakes: None,
+                disputed_areas: None,
                 disputed: None,
             },
             s,
@@ -639,6 +666,7 @@ mod tests {
             subject: &layer,
             context: None,
             lakes: None,
+            disputed_areas: None,
             disputed: None,
         };
         let out = render_map(src, &spec(r#"{"region": "Westland"}"#).unwrap()).unwrap();
@@ -692,12 +720,32 @@ mod tests {
             subject: &subject,
             context: Some(&context),
             lakes: Some(&context),
+            disputed_areas: None,
             disputed: None,
         };
         let out = render_map(src, &RenderSpec::default()).unwrap();
-        assert!(out
-            .svg
-            .contains(r#"<desc id="attribution">IGN (Etalab 2.0); Natural Earth</desc>"#));
+        assert!(out.svg.contains(
+            r#"<desc id="attribution">IGN (Etalab 2.0); Natural Earth (de facto view)</desc>"#
+        ));
+        // A point-of-view file names its view.
+        let india = LoadedLayer::parse(
+            TWIN,
+            &LayerSpec {
+                worldview: Some("ind".into()),
+                ..LayerSpec::with_dataset(Dataset::NeAdmin0)
+            },
+        )
+        .unwrap();
+        let out = render_map(
+            Sources {
+                context: Some(&india),
+                lakes: None,
+                ..src
+            },
+            &RenderSpec::default(),
+        )
+        .unwrap();
+        assert!(out.svg.contains("Natural Earth (IND view)"));
         let out = render_map(src, &spec(r#"{"attribution": "Mine"}"#).unwrap()).unwrap();
         assert!(out.svg.contains(">Mine</desc>"));
         // A custom layer without a credit adds none.

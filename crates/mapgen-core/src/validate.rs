@@ -145,28 +145,13 @@ pub fn check(features: &[MapFeature], opts: &CheckOptions) -> Vec<Issue> {
         }
     }
 
-    // Overlaps between features whose bounding boxes intersect.
-    let tree = bbox_tree(features);
-    for (i, f) in features.iter().enumerate() {
-        let Some(b) = f.geometry.bounding_rect() else {
-            continue;
-        };
-        let env = rstar::AABB::from_corners([b.min().x, b.min().y], [b.max().x, b.max().y]);
-        for hit in tree.locate_in_envelope_intersecting(&env) {
-            let j = hit.data;
-            if j <= i {
-                continue;
-            }
-            let g = &features[j];
-            let overlap = f.geometry.intersection(&g.geometry).unsigned_area();
-            let smaller = f.geometry.unsigned_area().min(g.geometry.unsigned_area());
-            if smaller > 0.0 && overlap / smaller > opts.overlap_min_share {
-                let pm = (1000.0 * overlap / smaller)
-                    .round()
-                    .min(f64::from(u32::MAX)) as u32;
-                issues.insert(issue(f, IssueKind::Overlap(pm), Some(g)));
-            }
-        }
+    for (i, j, share) in overlaps(features, opts.overlap_min_share) {
+        let pm = (1000.0 * share).round().min(f64::from(u32::MAX)) as u32;
+        issues.insert(issue(
+            &features[i],
+            IssueKind::Overlap(pm),
+            Some(&features[j]),
+        ));
     }
 
     // Near-miss borders: outline vertices close to another feature's outline.
@@ -178,6 +163,35 @@ pub fn check(features: &[MapFeature], opts: &CheckOptions) -> Vec<Issue> {
         ));
     }
     issues.into_iter().collect()
+}
+
+/// Pairs of features that overlap by more than `min_share` of the smaller
+/// one, as `(i, j, share)` with `i < j`. Such overlaps are competing claims
+/// when the features are countries (e.g. per-country boundary files).
+pub fn overlaps(features: &[MapFeature], min_share: f64) -> Vec<(usize, usize, f64)> {
+    let tree = bbox_tree(features);
+    let mut out = Vec::new();
+    for (i, f) in features.iter().enumerate() {
+        let Some(b) = f.geometry.bounding_rect() else {
+            continue;
+        };
+        let env = rstar::AABB::from_corners([b.min().x, b.min().y], [b.max().x, b.max().y]);
+        let mut hits: Vec<usize> = tree
+            .locate_in_envelope_intersecting(&env)
+            .map(|h| h.data)
+            .filter(|&j| j > i)
+            .collect();
+        hits.sort_unstable();
+        for j in hits {
+            let g = &features[j];
+            let overlap = f.geometry.intersection(&g.geometry).unsigned_area();
+            let smaller = f.geometry.unsigned_area().min(g.geometry.unsigned_area());
+            if smaller > 0.0 && overlap / smaller > min_share {
+                out.push((i, j, overlap / smaller));
+            }
+        }
+    }
+    out
 }
 
 /// What [`repair`] changed.

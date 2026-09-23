@@ -24,6 +24,9 @@ pub struct LayerQuery {
     pub parent_name_column: Option<String>,
     /// Column holding the country, as ISO 3166-1 alpha-2 or alpha-3.
     pub country_column: Option<String>,
+    /// Column with a note appended to the name ("Jammu and Kashmir — Admin.
+    /// by India; Claimed by Pakistan").
+    pub note_column: Option<String>,
     /// CSS class emitted on each path.
     pub class: String,
 }
@@ -41,6 +44,40 @@ pub enum Source {
     NaturalEarthLakes,
     /// Natural Earth 1:10m disputed and claimed boundary lines.
     NaturalEarthDisputedLines,
+    /// Natural Earth 1:10m disputed areas (polygons), e.g. Kashmir, Aksai Chin.
+    NaturalEarthDisputedAreas,
+}
+
+/// Natural Earth's point-of-view variants of Admin-0: each country's own
+/// view of disputed borders (`ne_10m_admin_0_countries_<code>`), plus `ISO`
+/// (ISO 3166 view) and `TLC`.
+pub const NATURAL_EARTH_WORLDVIEWS: [&str; 33] = [
+    "ARG", "BDG", "BRA", "CHN", "DEU", "EGY", "ESP", "FRA", "GBR", "GRC", "IDN", "IND", "ISO",
+    "ISR", "ITA", "JPN", "KOR", "MAR", "NEP", "NLD", "PAK", "POL", "PRT", "PSE", "RUS", "SAU",
+    "SWE", "TLC", "TUR", "TWN", "UKR", "USA", "VNM",
+];
+
+/// The point-of-view variant of a Natural Earth Admin-0 file:
+/// `ne_10m_admin_0.geojson` + `IND` → `ne_10m_admin_0_ind.geojson` (as saved
+/// by `scripts/fetch-data.sh ne-worldview IND`).
+pub fn worldview_path(path: &Path, code: &str) -> Result<std::path::PathBuf> {
+    let code = code.trim().to_ascii_uppercase();
+    if !NATURAL_EARTH_WORLDVIEWS.contains(&code.as_str()) {
+        return Err(Error::Table(format!(
+            "unknown worldview {code:?} (Natural Earth has: {})",
+            NATURAL_EARTH_WORLDVIEWS.join(", ")
+        )));
+    }
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("geojson");
+    let file = format!("{stem}_{}.{ext}", code.to_ascii_lowercase());
+    Ok(path.with_file_name(file))
 }
 
 impl Source {
@@ -102,6 +139,16 @@ impl Source {
                 None,
                 "lake",
             ),
+            Source::NaturalEarthDisputedAreas => LayerQuery {
+                note_column: Some("NOTE_BRK".into()),
+                ..q(
+                    "ne_10m_admin_0_disputed_areas".into(),
+                    &["BRK_A3"],
+                    "BRK_NAME",
+                    None,
+                    "disputed-area",
+                )
+            },
             Source::NaturalEarthDisputedLines => q(
                 "ne_10m_admin_0_boundary_lines_disputed_areas".into(),
                 &["ne_id"],

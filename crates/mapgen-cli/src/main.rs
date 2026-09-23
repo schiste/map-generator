@@ -16,7 +16,8 @@ use mapgen_data::geojson::{read_lines, read_records};
 use mapgen_data::gpkg_write::{write_gpkg, WriteOptions};
 use mapgen_data::table::read_table;
 use mapgen_data::{
-    list_regions, read_grouped, read_layer, read_layer_in, Format, LayerQuery, Source,
+    list_regions, read_grouped, read_layer, read_layer_in, worldview_path, Format, LayerQuery,
+    Source,
 };
 use rayon::prelude::*;
 
@@ -106,6 +107,18 @@ struct InputArgs {
     #[arg(long)]
     disputed: Option<PathBuf>,
 
+    /// Disputed areas, drawn hatched with a dashed outline: Natural Earth
+    /// `ne_10m_admin_0_disputed_areas` (.gpkg or .geojson).
+    #[arg(long)]
+    disputed_areas: Option<PathBuf>,
+
+    /// Natural Earth point of view for disputed borders (e.g. IND, PAK, CHN,
+    /// UKR, RUS, ISO): uses `<file>_<code>` variants of the Natural Earth
+    /// country files (fetch with `scripts/fetch-data.sh ne-worldview <code>`)
+    /// and names the view in the credit. Default: Natural Earth's de facto view.
+    #[arg(long)]
+    worldview: Option<String>,
+
     /// Data credit embedded in the SVG. Default: built from the inputs
     /// (`<file>.license.json` next to a data file, or Natural Earth).
     #[arg(long)]
@@ -177,6 +190,7 @@ impl InputArgs {
             self.context.as_deref(),
             self.lakes.as_deref(),
             self.disputed.as_deref(),
+            self.disputed_areas.as_deref(),
         ];
         for (i, path) in inputs.into_iter().enumerate() {
             let Some(path) = path else { continue };
@@ -186,7 +200,7 @@ impl InputArgs {
                     l.credit()
                 }
                 None if i > 0 || matches!(self.dataset, Dataset::NeAdmin0 | Dataset::NeAdmin1) => {
-                    "Natural Earth".to_owned()
+                    self.natural_earth_credit()
                 }
                 None => continue,
             };
@@ -198,6 +212,38 @@ impl InputArgs {
             (!credits.is_empty()).then(|| credits.join("; ")),
             share_alike,
         )
+    }
+
+    /// Natural Earth credit, naming the point of view of disputed borders.
+    fn natural_earth_credit(&self) -> String {
+        match &self.worldview {
+            Some(v) => format!("Natural Earth ({} view)", v.to_ascii_uppercase()),
+            None => "Natural Earth (de facto view)".to_owned(),
+        }
+    }
+
+    /// The Natural Earth country file for the chosen worldview (or `path`).
+    fn country_file(&self, path: &Path) -> Result<PathBuf> {
+        let Some(view) = &self.worldview else {
+            return Ok(path.to_path_buf());
+        };
+        let variant = worldview_path(path, view)?;
+        if !variant.exists() {
+            bail!(
+                "{} not found: fetch it with `scripts/fetch-data.sh ne-worldview {}`",
+                variant.display(),
+                view.to_ascii_uppercase()
+            );
+        }
+        Ok(variant)
+    }
+
+    /// The input file to read: for Natural Earth countries, the worldview variant.
+    fn subject_file(&self, input: &Path) -> Result<PathBuf> {
+        match self.dataset {
+            Dataset::NeAdmin0 => self.country_file(input),
+            _ => Ok(input.to_path_buf()),
+        }
     }
 
     /// Neighbouring countries, lakes and disputed lines, limited to `bbox`
@@ -215,9 +261,14 @@ impl InputArgs {
                 .with_context(|| format!("reading {}", p.display()))?,
             None => Vec::new(),
         };
+        let countries = match &self.context {
+            Some(p) => Some(self.country_file(p)?),
+            None => None,
+        };
         Ok(Surroundings {
-            countries: load(&self.context, Source::NaturalEarthAdmin0)?,
+            countries: load(&countries, Source::NaturalEarthAdmin0)?,
             lakes: load(&self.lakes, Source::NaturalEarthLakes)?,
+            disputed_areas: load(&self.disputed_areas, Source::NaturalEarthDisputedAreas)?,
             disputed,
         })
     }
@@ -227,7 +278,35 @@ impl InputArgs {
 struct Surroundings {
     countries: Vec<MapFeature>,
     lakes: Vec<MapFeature>,
+    disputed_areas: Vec<MapFeature>,
     disputed: Vec<MapLine>,
+}
+
+/// Warns when neighbouring countries overlap: competing claims (e.g. from
+/// per-country boundary files) would otherwise be drawn on top of each
+/// other without a word.
+fn warn_overlapping_claims(context: &[MapFeature]) {
+    let pairs = validate::overlaps(context, 0.01);
+    if pairs.is_empty() {
+        return;
+    }
+    let shown: Vec<String> = pairs
+        .iter()
+        .take(6)
+        .map(|&(i, j, share)| {
+            format!(
+                "{}/{} ({:.0}%)",
+                context[i].id,
+                context[j].id,
+                100.0 * share
+            )
+        })
+        .collect();
+    eprintln!(
+        "warning: neighbouring countries overlap, e.g. competing claims drawn on top of each other: {}{} (consider --worldview or --disputed-areas)",
+        shown.join(", "),
+        if pairs.len() > 6 { format!(" and {} more", pairs.len() - 6) } else { String::new() }
+    );
 }
 
 /// Lon/lat box around the subject, generously padded, for loading only the
@@ -632,8 +711,9 @@ fn run_render(args: RenderArgs) -> Result<()> {
         bail!("--region needs a filter column: pass --filter-column or a --dataset preset");
     }
 
-    let mut subject = read_layer(&args.input, &query, region.as_deref())
-        .with_context(|| format!("reading {}", args.input.display()))?;
+    let input = args.data.subject_file(&args.input)?;
+    let mut subject = read_layer(&input, &query, region.as_deref())
+        .with_context(|| format!("reading {}", input.display()))?;
     if subject.is_empty() {
         bail!(
             "no features matched region {:?}",
@@ -658,9 +738,11 @@ fn run_render(args: RenderArgs) -> Result<()> {
         subject,
         context: context.countries,
         lakes: context.lakes,
+        disputed_areas: context.disputed_areas,
         disputed: context.disputed,
     };
     layers.exclude_subject_from_context(region.as_deref());
+    warn_overlapping_claims(&layers.context);
     let rendered = render(&layers, &opts)?;
     let body = if html {
         to_html(&rendered.svg, &args.out, args.title.as_deref(), &opts.theme)
@@ -761,7 +843,10 @@ struct Batch<'a> {
 type JobResult = (String, Result<String>);
 
 fn run_batch(args: BatchArgs) -> Result<()> {
-    let files = expand_inputs(&args.input)?;
+    let files = expand_inputs(&args.input)?
+        .into_iter()
+        .map(|f| args.data.subject_file(&f))
+        .collect::<Result<Vec<_>>>()?;
     if files.is_empty() {
         bail!("no .geojson, .json or .gpkg files found in the given inputs");
     }
@@ -936,6 +1021,7 @@ impl Batch<'_> {
         let mut layers = MapLayers {
             context: self.context.countries.clone(),
             lakes: self.context.lakes.clone(),
+            disputed_areas: self.context.disputed_areas.clone(),
             disputed: self.context.disputed.clone(),
             subject,
         };

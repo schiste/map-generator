@@ -8,6 +8,7 @@
 #   scripts/fetch-data.sh geoboundaries FRA,DEU ADM1 --simplified
 #   scripts/fetch-data.sh geoboundaries ALL ADM1     # every country (large)
 #   scripts/fetch-data.sh us-counties-fips           # Census county codes (for convert --ids-from)
+#   scripts/fetch-data.sh ne-worldview IND           # Natural Earth's Indian view of borders (--worldview)
 #
 # geoBoundaries licences vary by country (public domain, CC BY, CC BY-SA,
 # ODbL, national open licences...). Each download gets a `.license.json`
@@ -38,6 +39,7 @@ case "${1:-}" in
     fetch "$base/ne_10m_admin_1_states_provinces.geojson" "$DATA_DIR/ne_10m_admin_1.geojson"
     fetch "$base/ne_10m_lakes.geojson" "$DATA_DIR/ne_10m_lakes.geojson"
     fetch "$base/ne_10m_admin_0_boundary_lines_disputed_areas.geojson" "$DATA_DIR/ne_10m_disputed_lines.geojson"
+    fetch "$base/ne_10m_admin_0_disputed_areas.geojson" "$DATA_DIR/ne_10m_disputed_areas.geojson"
     ls -1 "$DATA_DIR"/*.geojson
     ;;
   natural-earth)
@@ -98,6 +100,13 @@ for m in metas:
     print(f"{dest}  [{m['boundaryLicense']}; {m['boundarySource']}]")
 PY
     ;;
+  ne-worldview)
+    # Natural Earth point-of-view variants of the country layers (--worldview).
+    view="${2:?usage: $0 ne-worldview CODE (e.g. IND, PAK, CHN, UKR, RUS, ISO)}"
+    view=$(echo "$view" | tr '[:upper:]' '[:lower:]')
+    base="https://raw.githubusercontent.com/nvkelso/natural-earth-vector/$NE_COMMIT/geojson"
+    fetch "$base/ne_10m_admin_0_countries_$view.geojson" "$DATA_DIR/ne_10m_admin_0_$view.geojson"
+    ;;
   us-counties-fips)
     # US Census county boundaries with 5-digit FIPS codes as feature ids
     # (public-domain Census data, as packaged by plotly/datasets, MIT), pinned.
@@ -107,7 +116,7 @@ PY
     fetch "https://www2.census.gov/geo/docs/reference/state.txt" "$DATA_DIR/us-states.txt"
     ;;
   *)
-    echo "usage: $0 {ne-geojson|natural-earth|geoboundaries ISO3 LEVEL|us-counties-fips}" >&2
+    echo "usage: $0 {ne-geojson|ne-worldview CODE|natural-earth|geoboundaries ISO3 LEVEL|us-counties-fips}" >&2
     exit 1
     ;;
 esac

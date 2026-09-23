@@ -46,6 +46,26 @@ Licences seen in practice:
 renders every downloaded file, crediting each map from its own sidecar.
 Check the `.license.json` before publishing.
 
+## Natural Earth points of view (public domain)
+
+Natural Earth's default Admin-0 layer shows its own de facto view of disputed borders
+([policy](https://www.naturalearthdata.com/about/disputed-boundaries-policy/)); every map says
+so in its credit ("Natural Earth (de facto view)"). Point-of-view variants exist for about
+thirty countries plus an ISO view: `scripts/fetch-data.sh ne-worldview IND` fetches
+`data/ne_10m_admin_0_ind.geojson`, and `--worldview IND` uses it for the country and
+neighbour layers and names it in the credit ("Natural Earth (IND view)").
+
+When neighbouring countries overlap (e.g. per-country files with competing claims),
+`mapgen render` warns instead of silently drawing one on top of the other.
+
+## Natural Earth disputed areas (public domain)
+
+`ne_10m_admin_0_disputed_areas` (fetched by `ne-geojson` as
+`data/ne_10m_disputed_areas.geojson`): Kashmir, Aksai Chin, Western Sahara and others, drawn
+with a hatched fill and dashed outline (`mg-disputed-area`) with `--disputed-areas`. Tooltips
+carry Natural Earth's note ("Jammu and Kashmir — Admin. by India; Claimed by Pakistan").
+Disputed areas get no country class, so colouring tools don't assign them to either side.
+
 ## Natural Earth disputed boundaries (public domain)
 
 `ne_10m_admin_0_boundary_lines_disputed_areas` (fetched by `ne-geojson` as

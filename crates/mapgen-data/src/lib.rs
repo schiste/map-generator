@@ -18,6 +18,6 @@ pub mod table;
 
 pub use error::{Error, Result};
 pub use layer::{
-    group_rows, list_regions, read_grouped, read_layer, read_layer_in, read_layer_str, Format,
-    LayerQuery, Source,
+    group_rows, list_regions, read_grouped, read_layer, read_layer_in, read_layer_str,
+    worldview_path, Format, LayerQuery, Source, NATURAL_EARTH_WORLDVIEWS,
 };

@@ -50,6 +50,7 @@ pub fn read_features_in(
         &query.parent_column,
         &query.parent_name_column,
         &query.country_column,
+        &query.note_column,
     ] {
         match optional.as_deref().filter(|c| has(c)) {
             Some(c) => select.push(ident(c)?),
@@ -89,7 +90,7 @@ pub fn read_features_in(
     let n = id_cols.len();
     let mut features = Vec::new();
     while let Some(row) = rows.next()? {
-        let Some(blob) = row.get::<_, Option<Vec<u8>>>(n + 4)? else {
+        let Some(blob) = row.get::<_, Option<Vec<u8>>>(n + 5)? else {
             continue;
         };
         let ids = (0..n).map(|i| row.get::<_, Value>(i).map(value_to_string));
@@ -100,7 +101,11 @@ pub fn read_features_in(
                 break;
             }
         }
-        let name = meaningful(value_to_string(row.get(n)?));
+        let note = meaningful(value_to_string(row.get(n + 4)?));
+        let name = match (meaningful(value_to_string(row.get(n)?)), note) {
+            (Some(name), Some(note)) => Some(format!("{name} — {note}")),
+            (name, _) => name,
+        };
         let parent = meaningful(value_to_string(row.get(n + 1)?));
         let parent_name = parent
             .as_ref()

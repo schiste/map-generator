@@ -23,7 +23,9 @@ use wasm_bindgen::JsCast;
 
 #[wasm_bindgen(typescript_custom_section)]
 const TYPES: &str = r##"
-export type Dataset = "custom" | "ne-admin0" | "ne-admin1" | "ne-lakes" | "ne-disputed" | "geoboundaries";
+export type Dataset =
+  | "custom" | "ne-admin0" | "ne-admin1" | "ne-lakes" | "ne-disputed" | "ne-disputed-areas"
+  | "geoboundaries";
 
 /** How to read a GeoJSON layer. */
 export interface LayerSpec {
@@ -39,8 +41,10 @@ export interface LayerSpec {
   parentNameProperty?: string;
   /** Property with the country (ISO alpha-2 or alpha-3), emitted as a lowercase alpha-2 class (Maphue). */
   countryProperty?: string;
-  /** Data credit for this layer (Natural Earth presets default to "Natural Earth"). */
+  /** Data credit for this layer (Natural Earth presets default to "Natural Earth (de facto view)"). */
   attribution?: string;
+  /** For Natural Earth point-of-view files: the view, named in the credit ("IND"). */
+  worldview?: string;
 }
 
 export type ColorSlot =
@@ -118,6 +122,8 @@ export interface MapGenerator {
   setLakes(geojson?: string, spec?: LayerSpec): number;
   /** Loads disputed boundary lines, drawn dashed (default: Natural Earth); omit to remove. */
   setDisputed(geojson?: string, spec?: LayerSpec): number;
+  /** Loads disputed areas, drawn hatched (default: Natural Earth); omit to remove. */
+  setDisputedAreas(geojson?: string, spec?: LayerSpec): number;
   /** Renders a map. */
   render(spec?: RenderSpec): MapOutput;
 }
@@ -198,6 +204,7 @@ pub struct MapGenerator {
     subject: Option<LoadedLayer>,
     context: Option<LoadedLayer>,
     lakes: Option<LoadedLayer>,
+    disputed_areas: Option<LoadedLayer>,
     disputed: Option<LoadedLines>,
 }
 
@@ -244,6 +251,18 @@ impl MapGenerator {
         Ok(self.lakes.as_ref().map_or(0, LoadedLayer::len))
     }
 
+    /// Loads disputed areas (default preset: Natural Earth). Pass `undefined`
+    /// to remove them.
+    #[wasm_bindgen(js_name = setDisputedAreas, skip_typescript)]
+    pub fn set_disputed_areas(
+        &mut self,
+        geojson: Option<String>,
+        spec: Option<LayerSpecJs>,
+    ) -> Result<usize, JsError> {
+        self.disputed_areas = load_optional(geojson, spec, Dataset::NeDisputedAreas)?;
+        Ok(self.disputed_areas.as_ref().map_or(0, LoadedLayer::len))
+    }
+
     /// Loads disputed boundary lines (default preset: Natural Earth). Pass
     /// `undefined` to remove them.
     #[wasm_bindgen(js_name = setDisputed, skip_typescript)]
@@ -278,6 +297,7 @@ impl MapGenerator {
             subject: self.subject()?,
             context: self.context.as_ref(),
             lakes: self.lakes.as_ref(),
+            disputed_areas: self.disputed_areas.as_ref(),
             disputed: self.disputed.as_ref(),
         };
         Ok(to_js(&render_map(src, &spec).map_err(js_err)?)?.unchecked_into())

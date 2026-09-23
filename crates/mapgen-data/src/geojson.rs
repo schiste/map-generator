@@ -136,7 +136,11 @@ fn raw_features(text: &str, query: &LayerQuery) -> Result<Vec<RawFeature>> {
         .into_iter()
         .enumerate()
         .map(|(i, r)| {
-            let name = r.prop(&query.name_column);
+            let note = query.note_column.as_deref().and_then(|c| r.prop(c));
+            let name = match (r.prop(&query.name_column), note) {
+                (Some(n), Some(note)) => Some(format!("{n} — {note}")),
+                (name, _) => name,
+            };
             let id = query
                 .id_columns
                 .iter()
