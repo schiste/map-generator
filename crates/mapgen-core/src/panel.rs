@@ -17,7 +17,7 @@ use crate::antimeridian::{
 use crate::error::{Error, Result};
 use crate::feature::{MapFeature, MapLine};
 use crate::frame::{clip_to_rect, FrameMode};
-use crate::labels::{place_labels, Label, LabelOptions};
+use crate::labels::{place_labels_around, Label, LabelOptions};
 use crate::pipeline::{BorderMode, RenderOptions};
 use crate::projection::{MapProjection, Projection};
 use crate::simplify::{vw_epsilon, BorderArc, Topology};
@@ -372,47 +372,11 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
 
     // 7. Labels, in pixels.
     let (labels, translations) = if opts.labels {
-        let px: Vec<MultiPolygon<f64>> = subject
-            .iter()
-            .map(|f| {
-                f.geometry.map_coords(|c| {
-                    let (x, y) = viewport.to_px(c.x, c.y);
-                    coord! { x: x, y: y }
-                })
-            })
-            .collect();
-        let regions_in = |lang: Option<&str>| -> Vec<(&str, &MultiPolygon<f64>)> {
-            subject
-                .iter()
-                .zip(&px)
-                .map(|(f, g)| {
-                    let name = lang.and_then(|l| f.names.get(l)).unwrap_or(&f.name);
-                    (name.as_str(), g)
-                })
-                .collect()
-        };
         let bounds = match placement {
             Placement::Canvas { width, .. } => [0.0, 0.0, f64::from(width), viewport.canvas_height],
             Placement::Box(b) => [b.min().x, b.min().y, b.max().x, b.max().y],
         };
-        let label_opts = LabelOptions {
-            size: label_size,
-            min_scale: opts.label_min_scale,
-            leaders: opts.label_leaders,
-            curved: opts.label_curved,
-        };
-        let translations = opts
-            .languages
-            .iter()
-            .map(|l| {
-                let placed = place_labels(&regions_in(Some(l)), bounds, &label_opts);
-                (l.clone(), placed)
-            })
-            .collect();
-        (
-            place_labels(&regions_in(None), bounds, &label_opts),
-            translations,
-        )
+        panel_labels(&subject, &viewport, bounds, opts, label_size, &[])
     } else {
         (Vec::new(), Vec::new())
     };
@@ -660,6 +624,51 @@ fn fit(frame: Rect<f64>, placement: Placement) -> Result<Viewport> {
             })
         }
     }
+}
+
+/// Labels of a panel's regions, in the default name and in each of
+/// `opts.languages`, placed within `bounds` and clear of `reserved` boxes.
+pub(crate) fn panel_labels(
+    subject: &[MapFeature],
+    viewport: &Viewport,
+    bounds: [f64; 4],
+    opts: &RenderOptions,
+    label_size: f64,
+    reserved: &[[f64; 4]],
+) -> (Vec<Label>, Vec<(String, Vec<Label>)>) {
+    let px: Vec<MultiPolygon<f64>> = subject
+        .iter()
+        .map(|f| {
+            f.geometry.map_coords(|c| {
+                let (x, y) = viewport.to_px(c.x, c.y);
+                coord! { x: x, y: y }
+            })
+        })
+        .collect();
+    let regions_in = |lang: Option<&str>| -> Vec<(&str, &MultiPolygon<f64>)> {
+        subject
+            .iter()
+            .zip(&px)
+            .map(|(f, g)| {
+                let name = lang.and_then(|l| f.names.get(l)).unwrap_or(&f.name);
+                (name.as_str(), g)
+            })
+            .collect()
+    };
+    let label_opts = LabelOptions {
+        size: label_size,
+        min_scale: opts.label_min_scale,
+        leaders: opts.label_leaders,
+        curved: opts.label_curved,
+    };
+    let place =
+        |lang: Option<&str>| place_labels_around(&regions_in(lang), bounds, &label_opts, reserved);
+    let translations = opts
+        .languages
+        .iter()
+        .map(|l| (l.clone(), place(Some(l))))
+        .collect();
+    (place(None), translations)
 }
 
 #[cfg(test)]

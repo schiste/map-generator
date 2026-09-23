@@ -106,6 +106,17 @@ pub fn place_labels(
     bounds: [f64; 4],
     opts: &LabelOptions,
 ) -> Vec<Label> {
+    place_labels_around(regions, bounds, opts, &[])
+}
+
+/// [`place_labels`], keeping clear of `reserved` boxes (`[min_x, min_y,
+/// max_x, max_y]` in pixels), such as insets drawn over the map.
+pub fn place_labels_around(
+    regions: &[(&str, &MultiPolygon<f64>)],
+    bounds: [f64; 4],
+    opts: &LabelOptions,
+    reserved: &[[f64; 4]],
+) -> Vec<Label> {
     // Largest part of each region, and every part for obstacle tests.
     let mains: Vec<Option<&Polygon<f64>>> = regions
         .iter()
@@ -139,7 +150,12 @@ pub fn place_labels(
             .any(|hit| parts[hit.data].contains(&pt))
     };
 
-    let mut placed: RTree<Rectangle<[f64; 2]>> = RTree::new();
+    let mut placed: RTree<Rectangle<[f64; 2]>> = RTree::bulk_load(
+        reserved
+            .iter()
+            .map(|r| Rectangle::from_corners([r[0], r[1]], [r[2], r[3]]))
+            .collect(),
+    );
     let mut labels = Vec::new();
     let min_scale = opts.min_scale.clamp(0.1, 1.0);
     let sizes: Vec<f64> = [1.0, 0.85, 0.7]

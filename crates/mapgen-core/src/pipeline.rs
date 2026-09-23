@@ -8,7 +8,7 @@ use rstar::RTree;
 use crate::error::{Error, Result};
 use crate::feature::{MapFeature, MapLine};
 use crate::frame::{anchor as frame_anchor, clusters, Cluster, FrameMode};
-use crate::panel::{build_panel, GeoExtent, Panel, PanelSpec, Placement};
+use crate::panel::{build_panel, panel_labels, GeoExtent, Panel, PanelSpec, Placement};
 use crate::projection::{
     one_sixth_parallels, Albers, EqualEarth, LambertAzimuthalEqualArea, LambertConformalConic,
     MapProjection, Projection, ProjectionChoice,
@@ -312,6 +312,30 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
             projection: panel.projection.name(),
         });
         panels.push(panel);
+    }
+
+    // Insets are drawn over the main map: place its labels clear of them.
+    if opts.labels && !boxes.is_empty() {
+        let reserved: Vec<[f64; 4]> = boxes
+            .iter()
+            .map(|b| {
+                [
+                    b.min().x - 2.0,
+                    b.min().y - 2.0,
+                    b.max().x + 2.0,
+                    b.max().y + 2.0,
+                ]
+            })
+            .collect();
+        let main = &mut panels[0];
+        (main.labels, main.translations) = panel_labels(
+            &main.subject,
+            &main.viewport,
+            [0.0, 0.0, width, height],
+            opts,
+            opts.theme.label_size,
+            &reserved,
+        );
     }
 
     let shown: BTreeSet<&str> = panels
