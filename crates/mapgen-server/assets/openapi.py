@@ -17,50 +17,35 @@ MAP_HEADERS = {
     "Link": {"description": "`<licence url>; rel=\"license\"`", "schema": {"type": "string"}},
 }
 
-render_params = [
-    ("width", "integer", "Width in pixels (at most 4000; default 1000)."),
-    ("padding", "integer", "Padding in pixels."),
-    ("precision", "integer", "Decimal places of coordinates (default 1)."),
-    ("title", "string", "Document title."),
-    ("show-title", "boolean", "Draw the title in a band above the map."),
-    ("caption", "string", "Text drawn under the map (wrapped)."),
-    ("alt", "string", "Description for screen readers (<desc id=\"description\">)."),
-    ("height", "integer", "Fixed height in pixels; the frame widens to fill it."),
-    ("attribution", "string", "Data credit (default: from the data)."),
-    ("credit", "boolean", "Draw the credit in the bottom-right corner."),
-    ("boundary-year", "string", "Year the boundaries represent (default: from the data)."),
-    ("source-release", "string", "Dataset release (default: the hosted one)."),
-    ("theme", "string", "`wikimedia` (default), `light`, `dark` or `mono`."),
-    ("labels", "boolean", "Label the regions."),
-    ("context-labels", "boolean", "Name the neighbouring countries, where room is left."),
-    ("capitals", "string", "`none` (default), `countries` (national capitals) or `all` (also regional capitals inside the map)."),
-    ("languages", "string", "Also label in these languages (comma-separated BCP 47 tags)."),
-    ("target", "string", "`commons` (default for SVG; curved labels as rotated letters, for librsvg) or `web` (textPath)."),
-    ("border-mode", "string", "`layer` (default) or `regions`."),
-    ("css-vars", "boolean", "Colours as `var(--mg-<slot>, …)`."),
-    ("frame", "string", "`auto`, `all` or `world`."),
-    ("bbox", "string", "`west,south,east,north` or a preset name (see /bbox-presets)."),
-    ("projection", "string", "`auto`, `laea`, `equal-earth`, `albers`, `lcc`."),
-    ("parallels", "string", "Standard parallels for albers/lcc: `south,north`."),
-    ("center-lon", "number", "Central meridian."),
-    ("insets", "string", "`auto` (default) or `none`."),
-    ("max-insets", "integer", "At most this many insets."),
-    ("leaders", "boolean", "Leader lines for small regions' labels (default true)."),
-    ("curved-labels", "boolean", "Curve labels along long, thin regions (default true)."),
-    ("label-size", "number", "Label size in pixels."),
-    ("label-min-scale", "number", "Smallest label size as a fraction of label-size."),
-    ("border-width", "number", None), ("parent-border-width", "number", None), ("outline-width", "number", None),
-    ("context-border-width", "number", None), ("disputed-border-width", "number", None),
-    ("snap", "number", "Snap neighbours within this many pixels onto the outline."),
-    ("simplify", "number", "Simplification tolerance in pixels."),
-    ("min-area", "number", "Drop islands and lakes smaller than this many px²."),
-    ("margin", "number", "Room around the frame, as a fraction of its size."),
-    ("worldview", "string", "Natural Earth point of view for disputed borders, e.g. `IND` (see /datasets: worldviews)."),
-    ("release", "string", "Pin the URL to a dataset release: the response is then cached as immutable; 404 once that release is gone."),
-]
-map_query = [{"name": n, "in": "query", "schema": {"type": t}, **({"description": d} if d else {})} for n, t, d in render_params]
+# Map settings come from the render-option description (options.rs, via
+# render-options.json, which a server test keeps current): one definition for
+# the parser, this file and /render-options.
+here = os.path.dirname(os.path.abspath(__file__))
+render_options = json.load(open(os.path.join(here, "render-options.json"), encoding="utf-8"))
+JSON_TYPES = {"boolean": "boolean", "integer": "integer", "number": "number", "string": "string", "list": "string", "pair": "string"}
+
+def option_param(o):
+    schema = {"type": JSON_TYPES[o["type"]]}
+    if o.get("choices"):
+        schema["enum"] = [c["value"] for c in o["choices"]]
+    for k in ("default", "minimum", "maximum", "exclusiveMinimum", "maxLength"):
+        if k in o:
+            schema[k] = o[k]
+    desc = o["description"]
+    if o["type"] == "list":
+        desc += " Comma-separated."
+    if o["type"] == "pair":
+        desc += " Two comma-separated numbers."
+    if "choicesSource" in o:
+        desc += f" Values: {o['choicesSource']}."
+    return {"name": o["name"], "in": "query", "schema": schema, "description": desc}
+
+map_query = [option_param(o) for o in render_options["options"]]
 map_query.append({"name": "color-{slot}", "in": "query", "schema": {"type": "string"},
-                  "description": "Colour of a slot, e.g. `color-water=%23c6ecff` (slots: /themes)."})
+                  "description": "Colour of a slot, e.g. `color-water=%23c6ecff`. Slots: "
+                  + ", ".join(s["slot"] for s in render_options["colorSlots"]) + " (/render-options)."})
+map_query.append({"name": "release", "in": "query", "schema": {"type": "string"},
+                  "description": "Pin the URL to a dataset release: the response is then cached as immutable; 404 once that release is gone."})
 
 paths = {
     "/api/v1/": {"get": {"summary": "Links to every endpoint", "responses": {"200": js({"type": "object"})}}},
@@ -70,6 +55,7 @@ paths = {
     "/api/v1/version": {"get": {"summary": "mapgen version, commit, SVG contract version, dataset releases", "responses": {"200": js({"type": "object"})}}},
     "/api/v1/themes": {"get": {"summary": "Built-in themes: { name: { slot: colour } }", "responses": {"200": js({"type": "object"})}}},
     "/api/v1/bbox-presets": {"get": {"summary": "Frame presets: { name: [west, south, east, north] }", "responses": {"200": js({"type": "object"})}}},
+    "/api/v1/render-options": {"get": {"summary": "Every map setting, for settings forms: type, label, help, widget, default, choices, limits, group, order and conditions (docs/api.md#render-options)", "responses": {"200": js({"type": "object"})}}},
     "/api/v1/datasets": {"get": {"summary": "Hosted datasets", "responses": {"200": js({"type": "array", "items": ref("Dataset")})}}},
     "/api/v1/datasets/{dataset}/regions": {"get": {"summary": "Regions a map can be made for", "parameters": [P_DATASET],
         "responses": {"200": js({"type": "array", "items": ref("Region")}), "404": problem("Unknown dataset")}}},

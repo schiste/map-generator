@@ -1,6 +1,6 @@
 // Compile-time test of the TypeScript definitions: `npm run typecheck`.
 // Lines marked @ts-expect-error must fail to type-check, or tsc reports an error.
-import { MapGenerator, themes, bboxPresets, version, reshape, parseRecipe, recipeToCsv, type Recipe, type Country, type MapOutput, type RenderSpec, type MatchOutput, type ReshapeOutput } from "../pkg/node/mapgen_wasm.js";
+import { MapGenerator, themes, bboxPresets, version, reshape, parseRecipe, recipeToCsv, renderOptions, type Recipe, type Country, type RenderOption, type Subdivision, type MapOutput, type RenderSpec, type MatchOutput, type ReshapeOutput } from "../pkg/node/mapgen_wasm.js";
 
 const gen = new MapGenerator();
 const n: number = gen.setSubject("{}");
@@ -85,3 +85,9 @@ const picked: Country[] = gen.countries();
 const resolved: string[] = gen.resolveRegions(["France"]).codes;
 gen.render({ regions: resolved });
 void recipeText; void picked;
+
+const options: RenderOption[] = renderOptions().options;
+const widget: "checkbox" | "select" | "number" | "text" | "textarea" | "tokens" | "bbox" | "pair" | undefined = options[0]?.widget;
+const slot: string | undefined = renderOptions().colorSlots[0]?.name;
+const subs: Subdivision[] = gen.subdivisions();
+void widget; void slot; void subs;

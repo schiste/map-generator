@@ -138,6 +138,23 @@
     }
    }
   },
+  "/api/v1/render-options": {
+   "get": {
+    "summary": "Every map setting, for settings forms: type, label, help, widget, default, choices, limits, group, order and conditions (docs/api.md#render-options)",
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/v1/datasets": {
    "get": {
     "summary": "Hosted datasets",
@@ -281,42 +298,20 @@
       "example": "FRA.svg"
      },
      {
-      "name": "width",
-      "in": "query",
-      "schema": {
-       "type": "integer"
-      },
-      "description": "Width in pixels (at most 4000; default 1000)."
-     },
-     {
-      "name": "padding",
-      "in": "query",
-      "schema": {
-       "type": "integer"
-      },
-      "description": "Padding in pixels."
-     },
-     {
-      "name": "precision",
-      "in": "query",
-      "schema": {
-       "type": "integer"
-      },
-      "description": "Decimal places of coordinates (default 1)."
-     },
-     {
       "name": "title",
       "in": "query",
       "schema": {
-       "type": "string"
+       "type": "string",
+       "maxLength": 200
       },
-      "description": "Document title."
+      "description": "The document's title; drawn on the map with show-title."
      },
      {
       "name": "show-title",
       "in": "query",
       "schema": {
-       "type": "boolean"
+       "type": "boolean",
+       "default": false
       },
       "description": "Draw the title in a band above the map."
      },
@@ -324,89 +319,97 @@
       "name": "caption",
       "in": "query",
       "schema": {
-       "type": "string"
+       "type": "string",
+       "maxLength": 1000
       },
-      "description": "Text drawn under the map (wrapped)."
+      "description": "Text drawn under the map, wrapped to its width."
      },
      {
       "name": "alt",
       "in": "query",
       "schema": {
-       "type": "string"
+       "type": "string",
+       "maxLength": 1000
       },
-      "description": "Description for screen readers (<desc id=\"description\">)."
+      "description": "What the map shows, for people who can't see it (<desc>)."
+     },
+     {
+      "name": "width",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "default": 1000,
+       "minimum": 16.0,
+       "maximum": 4000.0
+      },
+      "description": "Width in pixels."
      },
      {
       "name": "height",
       "in": "query",
       "schema": {
-       "type": "integer"
+       "type": "integer",
+       "minimum": 50.0,
+       "maximum": 10000.0
       },
-      "description": "Fixed height in pixels; the frame widens to fill it."
-     },
-     {
-      "name": "attribution",
-      "in": "query",
-      "schema": {
-       "type": "string"
-      },
-      "description": "Data credit (default: from the data)."
-     },
-     {
-      "name": "credit",
-      "in": "query",
-      "schema": {
-       "type": "boolean"
-      },
-      "description": "Draw the credit in the bottom-right corner."
-     },
-     {
-      "name": "boundary-year",
-      "in": "query",
-      "schema": {
-       "type": "string"
-      },
-      "description": "Year the boundaries represent (default: from the data)."
-     },
-     {
-      "name": "source-release",
-      "in": "query",
-      "schema": {
-       "type": "string"
-      },
-      "description": "Dataset release (default: the hosted one)."
+      "description": "A fixed height in pixels; the frame widens to fill it. Default: fit the map."
      },
      {
       "name": "theme",
       "in": "query",
       "schema": {
-       "type": "string"
+       "type": "string",
+       "enum": [
+        "wikimedia",
+        "light",
+        "dark",
+        "mono"
+       ],
+       "default": "wikimedia"
       },
-      "description": "`wikimedia` (default), `light`, `dark` or `mono`."
+      "description": "Colours of every slot; change single slots with color-<slot>. Values: /api/v1/themes."
+     },
+     {
+      "name": "padding",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "default": 0,
+       "minimum": 0.0
+      },
+      "description": "Empty space around the map, in pixels."
      },
      {
       "name": "labels",
       "in": "query",
       "schema": {
-       "type": "boolean"
+       "type": "boolean",
+       "default": false
       },
-      "description": "Label the regions."
+      "description": "Label the mapped regions, placed to fit."
      },
      {
       "name": "context-labels",
       "in": "query",
       "schema": {
-       "type": "boolean"
+       "type": "boolean",
+       "default": false
       },
-      "description": "Name the neighbouring countries, where room is left."
+      "description": "Name the neighbouring countries, where there is room."
      },
      {
       "name": "capitals",
       "in": "query",
       "schema": {
-       "type": "string"
+       "type": "string",
+       "enum": [
+        "none",
+        "countries",
+        "all"
+       ],
+       "default": "none"
       },
-      "description": "`none` (default), `countries` (national capitals) or `all` (also regional capitals inside the map)."
+      "description": "National capitals, or also the regional capitals inside the map."
      },
      {
       "name": "languages",
@@ -414,39 +417,73 @@
       "schema": {
        "type": "string"
       },
-      "description": "Also label in these languages (comma-separated BCP 47 tags)."
+      "description": "Also label in these languages (BCP 47 tags); viewers see their own. Comma-separated."
+     },
+     {
+      "name": "label-size",
+      "in": "query",
+      "schema": {
+       "type": "number",
+       "default": 11.0,
+       "exclusiveMinimum": 0.0
+      },
+      "description": "Size of region names in pixels; place and neighbour names are a little smaller."
+     },
+     {
+      "name": "label-min-scale",
+      "in": "query",
+      "schema": {
+       "type": "number",
+       "default": 0.7,
+       "maximum": 1.0,
+       "exclusiveMinimum": 0.0
+      },
+      "description": "How far labels may shrink to fit, as a share of the label size."
+     },
+     {
+      "name": "leaders",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": true
+      },
+      "description": "Label small regions outside them, with a line."
+     },
+     {
+      "name": "curved-labels",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": true
+      },
+      "description": "Curve labels along long, thin regions."
      },
      {
       "name": "target",
       "in": "query",
       "schema": {
-       "type": "string"
+       "type": "string",
+       "enum": [
+        "commons",
+        "web"
+       ],
+       "default": "commons"
       },
-      "description": "`commons` (default for SVG; curved labels as rotated letters, for librsvg) or `web` (textPath)."
-     },
-     {
-      "name": "border-mode",
-      "in": "query",
-      "schema": {
-       "type": "string"
-      },
-      "description": "`layer` (default) or `regions`."
-     },
-     {
-      "name": "css-vars",
-      "in": "query",
-      "schema": {
-       "type": "boolean"
-      },
-      "description": "Colours as `var(--mg-<slot>, …)`."
+      "description": "Wikimedia Commons (curved labels as rotated letters, which its renderer draws) or web pages (textPath)."
      },
      {
       "name": "frame",
       "in": "query",
       "schema": {
-       "type": "string"
+       "type": "string",
+       "enum": [
+        "auto",
+        "all",
+        "world"
+       ],
+       "default": "auto"
       },
-      "description": "`auto`, `all` or `world`."
+      "description": "What the map shows: the regions' main landmass, all of them, or the world."
      },
      {
       "name": "bbox",
@@ -454,146 +491,78 @@
       "schema": {
        "type": "string"
       },
-      "description": "`west,south,east,north` or a preset name (see /bbox-presets)."
+      "description": "An area to show instead of the frame: west,south,east,north in degrees, or a preset name. Values: /api/v1/bbox-presets."
      },
      {
       "name": "projection",
       "in": "query",
       "schema": {
-       "type": "string"
+       "type": "string",
+       "enum": [
+        "auto",
+        "laea",
+        "equal-earth",
+        "albers",
+        "lcc"
+       ],
+       "default": "auto"
       },
-      "description": "`auto`, `laea`, `equal-earth`, `albers`, `lcc`."
+      "description": "Automatic picks one suited to the area."
      },
      {
       "name": "parallels",
       "in": "query",
       "schema": {
-       "type": "string"
+       "type": "string",
+       "minimum": -89.9,
+       "maximum": 89.9
       },
-      "description": "Standard parallels for albers/lcc: `south,north`."
+      "description": "south,north in degrees, for conic projections. Default: from the area. Two comma-separated numbers."
      },
      {
       "name": "center-lon",
       "in": "query",
       "schema": {
-       "type": "number"
+       "type": "number",
+       "minimum": -180.0,
+       "maximum": 180.0
       },
-      "description": "Central meridian."
+      "description": "Longitude at the centre of world maps, in degrees."
      },
      {
       "name": "insets",
       "in": "query",
       "schema": {
-       "type": "string"
+       "type": "string",
+       "enum": [
+        "auto",
+        "none"
+       ],
+       "default": "auto"
       },
-      "description": "`auto` (default) or `none`."
+      "description": "Far-away parts (overseas territories, Alaska…) in corner boxes, or left out."
      },
      {
       "name": "max-insets",
       "in": "query",
       "schema": {
-       "type": "integer"
+       "type": "integer",
+       "default": 6,
+       "minimum": 0.0,
+       "maximum": 20.0
       },
-      "description": "At most this many insets."
-     },
-     {
-      "name": "leaders",
-      "in": "query",
-      "schema": {
-       "type": "boolean"
-      },
-      "description": "Leader lines for small regions' labels (default true)."
-     },
-     {
-      "name": "curved-labels",
-      "in": "query",
-      "schema": {
-       "type": "boolean"
-      },
-      "description": "Curve labels along long, thin regions (default true)."
-     },
-     {
-      "name": "label-size",
-      "in": "query",
-      "schema": {
-       "type": "number"
-      },
-      "description": "Label size in pixels."
-     },
-     {
-      "name": "label-min-scale",
-      "in": "query",
-      "schema": {
-       "type": "number"
-      },
-      "description": "Smallest label size as a fraction of label-size."
-     },
-     {
-      "name": "border-width",
-      "in": "query",
-      "schema": {
-       "type": "number"
-      }
-     },
-     {
-      "name": "parent-border-width",
-      "in": "query",
-      "schema": {
-       "type": "number"
-      }
-     },
-     {
-      "name": "outline-width",
-      "in": "query",
-      "schema": {
-       "type": "number"
-      }
-     },
-     {
-      "name": "context-border-width",
-      "in": "query",
-      "schema": {
-       "type": "number"
-      }
-     },
-     {
-      "name": "disputed-border-width",
-      "in": "query",
-      "schema": {
-       "type": "number"
-      }
-     },
-     {
-      "name": "snap",
-      "in": "query",
-      "schema": {
-       "type": "number"
-      },
-      "description": "Snap neighbours within this many pixels onto the outline."
-     },
-     {
-      "name": "simplify",
-      "in": "query",
-      "schema": {
-       "type": "number"
-      },
-      "description": "Simplification tolerance in pixels."
-     },
-     {
-      "name": "min-area",
-      "in": "query",
-      "schema": {
-       "type": "number"
-      },
-      "description": "Drop islands and lakes smaller than this many px²."
+      "description": "At most this many corner boxes."
      },
      {
       "name": "margin",
       "in": "query",
       "schema": {
-       "type": "number"
+       "type": "number",
+       "default": 0.04,
+       "minimum": 0.0,
+       "maximum": 1.0
       },
-      "description": "Room around the frame, as a fraction of its size."
+      "description": "Room around the frame, as a share of its size."
      },
      {
       "name": "worldview",
@@ -601,7 +570,164 @@
       "schema": {
        "type": "string"
       },
-      "description": "Natural Earth point of view for disputed borders, e.g. `IND` (see /datasets: worldviews)."
+      "description": "A Natural Earth point of view on disputed borders (country code). Default: de facto. Values: /api/v1/datasets."
+     },
+     {
+      "name": "border-mode",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "layer",
+        "regions"
+       ],
+       "default": "layer"
+      },
+      "description": "Borders drawn once in their own layer, or each region stroking its own outline (for hover effects)."
+     },
+     {
+      "name": "border-width",
+      "in": "query",
+      "schema": {
+       "type": "number",
+       "default": 0.5,
+       "exclusiveMinimum": 0.0
+      },
+      "description": "Borders between mapped regions, in pixels."
+     },
+     {
+      "name": "parent-border-width",
+      "in": "query",
+      "schema": {
+       "type": "number",
+       "default": 1.0,
+       "exclusiveMinimum": 0.0
+      },
+      "description": "Borders between regions of different parents (régions, states), in pixels."
+     },
+     {
+      "name": "outline-width",
+      "in": "query",
+      "schema": {
+       "type": "number",
+       "default": 0.8,
+       "exclusiveMinimum": 0.0
+      },
+      "description": "The outer edge of the mapped regions, in pixels."
+     },
+     {
+      "name": "context-border-width",
+      "in": "query",
+      "schema": {
+       "type": "number",
+       "default": 0.4,
+       "exclusiveMinimum": 0.0
+      },
+      "description": "Borders between neighbouring countries, in pixels."
+     },
+     {
+      "name": "disputed-border-width",
+      "in": "query",
+      "schema": {
+       "type": "number",
+       "default": 0.8,
+       "exclusiveMinimum": 0.0
+      },
+      "description": "Disputed and claimed boundaries, in pixels."
+     },
+     {
+      "name": "credit",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": false
+      },
+      "description": "Draw the data credit in a corner (it is always in the file)."
+     },
+     {
+      "name": "attribution",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "maxLength": 500
+      },
+      "description": "Replaces the credit taken from the data."
+     },
+     {
+      "name": "boundary-year",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "maxLength": 40
+      },
+      "description": "Year the boundaries represent. Default: from the data."
+     },
+     {
+      "name": "source-release",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "maxLength": 200
+      },
+      "description": "Release of the boundary data. Default: the hosted one."
+     },
+     {
+      "name": "precision",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "default": 1,
+       "minimum": 0.0,
+       "maximum": 6.0
+      },
+      "description": "Decimal places in path coordinates."
+     },
+     {
+      "name": "simplify",
+      "in": "query",
+      "schema": {
+       "type": "number",
+       "default": 0.5,
+       "minimum": 0.0
+      },
+      "description": "Drop detail smaller than this many pixels."
+     },
+     {
+      "name": "min-area",
+      "in": "query",
+      "schema": {
+       "type": "number",
+       "default": 0.5,
+       "minimum": 0.0
+      },
+      "description": "Drop islands and lakes smaller than this many square pixels."
+     },
+     {
+      "name": "snap",
+      "in": "query",
+      "schema": {
+       "type": "number",
+       "default": 2.0,
+       "minimum": 0.0
+      },
+      "description": "Snap neighbours within this many pixels onto the outline."
+     },
+     {
+      "name": "css-vars",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": false
+      },
+      "description": "Colours as var(--mg-<slot>, …), to restyle from a page."
+     },
+     {
+      "name": "color-{slot}",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "Colour of a slot, e.g. `color-water=%23c6ecff`. Slots: background, water, land, context-land, border, outline, coast, context-border, lake-border, disputed-border, label (/render-options)."
      },
      {
       "name": "release",
@@ -610,14 +736,6 @@
        "type": "string"
       },
       "description": "Pin the URL to a dataset release: the response is then cached as immutable; 404 once that release is gone."
-     },
-     {
-      "name": "color-{slot}",
-      "in": "query",
-      "schema": {
-       "type": "string"
-      },
-      "description": "Colour of a slot, e.g. `color-water=%23c6ecff` (slots: /themes)."
      },
      {
       "name": "If-None-Match",

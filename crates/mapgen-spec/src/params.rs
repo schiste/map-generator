@@ -29,31 +29,6 @@ fn err(param: &str, why: &str) -> ParamError {
     }
 }
 
-const BOOLS: [&str; 8] = [
-    "showTitle",
-    "credit",
-    "labels",
-    "contextLabels",
-    "dissolve",
-    "leaders",
-    "curvedLabels",
-    "cssVars",
-];
-const INTEGERS: [&str; 5] = ["width", "height", "padding", "precision", "maxInsets"];
-const NUMBERS: [&str; 12] = [
-    "borderWidth",
-    "parentBorderWidth",
-    "outlineWidth",
-    "contextBorderWidth",
-    "disputedBorderWidth",
-    "labelSize",
-    "labelMinScale",
-    "snap",
-    "simplify",
-    "minArea",
-    "margin",
-    "centerLon",
-];
 /// Set by the URL path, not the query (see `parse`).
 pub const PATH_PARAMS: [(&str, &str); 3] = [
     (
@@ -140,21 +115,24 @@ fn typed(field: &str, value: &str) -> Result<Value, String> {
             .map(Value::Number)
             .ok_or_else(|| format!("{v:?} is not a number"))
     };
-    if BOOLS.contains(&field) {
-        return match value {
-            "true" | "1" | "" => Ok(Value::Bool(true)),
-            "false" | "0" => Ok(Value::Bool(false)),
-            v => Err(format!("{v:?} is not true or false")),
-        };
-    }
-    if INTEGERS.contains(&field) {
-        return value
-            .parse::<u64>()
-            .map(|n| Value::Number(n.into()))
-            .map_err(|_| format!("{value:?} is not a whole number"));
-    }
-    if NUMBERS.contains(&field) {
-        return number(value);
+    // Types come from the option descriptions (`options.rs`).
+    use crate::options::Kind;
+    match crate::options::kind_of(field) {
+        Some(Kind::Boolean) => {
+            return match value {
+                "true" | "1" | "" => Ok(Value::Bool(true)),
+                "false" | "0" => Ok(Value::Bool(false)),
+                v => Err(format!("{v:?} is not true or false")),
+            }
+        }
+        Some(Kind::Integer) => {
+            return value
+                .parse::<u64>()
+                .map(|n| Value::Number(n.into()))
+                .map_err(|_| format!("{value:?} is not a whole number"))
+        }
+        Some(Kind::Number) => return number(value),
+        _ => {}
     }
     match field {
         // Commas in query strings; `;` in recipes, where a comma splits cells.

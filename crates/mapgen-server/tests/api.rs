@@ -743,3 +743,32 @@ async fn mixed_levels_countries_and_single_subdivisions() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// `assets/render-options.json` (read by openapi.py) is the description the
+/// server serves at its default width limit. `UPDATE_ASSETS=1` rewrites it.
+#[tokio::test]
+async fn render_options_are_served_and_the_asset_is_current() {
+    let (app, dir) = server("render-options");
+    let served = get(&app, "/api/v1/render-options").await;
+    assert_eq!(served.status, StatusCode::OK);
+    let doc = served.json();
+    assert_eq!(doc["version"], 1);
+    assert!(doc["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|o| o["name"] == "projection"));
+    let expected =
+        serde_json::to_string_pretty(&mapgen_spec::options::describe(4000)).unwrap() + "\n";
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/render-options.json");
+    if std::env::var_os("UPDATE_ASSETS").is_some() {
+        std::fs::write(&path, &expected).unwrap();
+    }
+    let committed = std::fs::read_to_string(&path).unwrap_or_default();
+    assert!(
+        committed == expected,
+        "{} is stale: run UPDATE_ASSETS=1 cargo test -p mapgen-server, then python3 crates/mapgen-server/assets/openapi.py",
+        path.display()
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

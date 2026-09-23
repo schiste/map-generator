@@ -1,0 +1,1027 @@
+{
+  "version": 1,
+  "groups": [
+    {
+      "id": "map",
+      "label": "Map",
+      "order": 10
+    },
+    {
+      "id": "labels",
+      "label": "Labels and places",
+      "order": 20
+    },
+    {
+      "id": "frame",
+      "label": "Frame and projection",
+      "order": 30
+    },
+    {
+      "id": "borders",
+      "label": "Borders",
+      "order": 40
+    },
+    {
+      "id": "colors",
+      "label": "Colours",
+      "order": 50
+    },
+    {
+      "id": "credit",
+      "label": "Credit",
+      "order": 60
+    },
+    {
+      "id": "output",
+      "label": "Output",
+      "order": 70
+    }
+  ],
+  "options": [
+    {
+      "name": "title",
+      "key": "title",
+      "inRenderSpec": true,
+      "type": "string",
+      "label": "Title",
+      "description": "The document's title; drawn on the map with show-title.",
+      "widget": "text",
+      "maxLength": 200,
+      "group": "map",
+      "order": 10,
+      "advanced": false
+    },
+    {
+      "name": "show-title",
+      "key": "showTitle",
+      "inRenderSpec": true,
+      "type": "boolean",
+      "label": "Title on the map",
+      "description": "Draw the title in a band above the map.",
+      "widget": "checkbox",
+      "default": false,
+      "group": "map",
+      "order": 20,
+      "advanced": false,
+      "visibleWhen": {
+        "option": "title",
+        "notEmpty": true
+      }
+    },
+    {
+      "name": "caption",
+      "key": "caption",
+      "inRenderSpec": true,
+      "type": "string",
+      "label": "Caption",
+      "description": "Text drawn under the map, wrapped to its width.",
+      "widget": "textarea",
+      "maxLength": 1000,
+      "group": "map",
+      "order": 30,
+      "advanced": false
+    },
+    {
+      "name": "alt",
+      "key": "alt",
+      "inRenderSpec": true,
+      "type": "string",
+      "label": "Description for screen readers",
+      "description": "What the map shows, for people who can't see it (<desc>).",
+      "widget": "textarea",
+      "maxLength": 1000,
+      "group": "map",
+      "order": 40,
+      "advanced": false
+    },
+    {
+      "name": "width",
+      "key": "width",
+      "inRenderSpec": true,
+      "type": "integer",
+      "label": "Width",
+      "description": "Width in pixels.",
+      "widget": "number",
+      "default": 1000,
+      "minimum": 16.0,
+      "maximum": 4000.0,
+      "step": 10.0,
+      "group": "map",
+      "order": 50,
+      "advanced": false
+    },
+    {
+      "name": "height",
+      "key": "height",
+      "inRenderSpec": true,
+      "type": "integer",
+      "label": "Height",
+      "description": "A fixed height in pixels; the frame widens to fill it. Default: fit the map.",
+      "widget": "number",
+      "minimum": 50.0,
+      "maximum": 10000.0,
+      "step": 10.0,
+      "group": "map",
+      "order": 60,
+      "advanced": false
+    },
+    {
+      "name": "theme",
+      "key": "theme",
+      "inRenderSpec": true,
+      "type": "string",
+      "label": "Theme",
+      "description": "Colours of every slot; change single slots with color-<slot>.",
+      "widget": "select",
+      "default": "wikimedia",
+      "choices": [
+        {
+          "value": "wikimedia",
+          "label": "Wikimedia"
+        },
+        {
+          "value": "light",
+          "label": "Light"
+        },
+        {
+          "value": "dark",
+          "label": "Dark"
+        },
+        {
+          "value": "mono",
+          "label": "Monochrome"
+        }
+      ],
+      "choicesSource": "/api/v1/themes",
+      "group": "map",
+      "order": 70,
+      "advanced": false
+    },
+    {
+      "name": "padding",
+      "key": "padding",
+      "inRenderSpec": true,
+      "type": "integer",
+      "label": "Padding",
+      "description": "Empty space around the map, in pixels.",
+      "widget": "number",
+      "default": 0,
+      "minimum": 0.0,
+      "step": 1.0,
+      "group": "map",
+      "order": 80,
+      "advanced": true
+    },
+    {
+      "name": "labels",
+      "key": "labels",
+      "inRenderSpec": true,
+      "type": "boolean",
+      "label": "Region names",
+      "description": "Label the mapped regions, placed to fit.",
+      "widget": "checkbox",
+      "default": false,
+      "group": "labels",
+      "order": 10,
+      "advanced": false
+    },
+    {
+      "name": "context-labels",
+      "key": "contextLabels",
+      "inRenderSpec": true,
+      "type": "boolean",
+      "label": "Neighbour names",
+      "description": "Name the neighbouring countries, where there is room.",
+      "widget": "checkbox",
+      "default": false,
+      "group": "labels",
+      "order": 20,
+      "advanced": false
+    },
+    {
+      "name": "capitals",
+      "key": "capitals",
+      "inRenderSpec": true,
+      "type": "string",
+      "label": "Capitals",
+      "description": "National capitals, or also the regional capitals inside the map.",
+      "widget": "select",
+      "default": "none",
+      "choices": [
+        {
+          "value": "none",
+          "label": "None"
+        },
+        {
+          "value": "countries",
+          "label": "National capitals"
+        },
+        {
+          "value": "all",
+          "label": "National and regional capitals"
+        }
+      ],
+      "group": "labels",
+      "order": 30,
+      "advanced": false
+    },
+    {
+      "name": "languages",
+      "key": "languages",
+      "inRenderSpec": true,
+      "type": "list",
+      "label": "Label languages",
+      "description": "Also label in these languages (BCP 47 tags); viewers see their own.",
+      "widget": "tokens",
+      "suggestions": [
+        {
+          "value": "ar",
+          "label": "Arabic"
+        },
+        {
+          "value": "bn",
+          "label": "Bengali"
+        },
+        {
+          "value": "de",
+          "label": "German"
+        },
+        {
+          "value": "el",
+          "label": "Greek"
+        },
+        {
+          "value": "en",
+          "label": "English"
+        },
+        {
+          "value": "es",
+          "label": "Spanish"
+        },
+        {
+          "value": "fa",
+          "label": "Persian"
+        },
+        {
+          "value": "fr",
+          "label": "French"
+        },
+        {
+          "value": "he",
+          "label": "Hebrew"
+        },
+        {
+          "value": "hi",
+          "label": "Hindi"
+        },
+        {
+          "value": "hu",
+          "label": "Hungarian"
+        },
+        {
+          "value": "id",
+          "label": "Indonesian"
+        },
+        {
+          "value": "it",
+          "label": "Italian"
+        },
+        {
+          "value": "ja",
+          "label": "Japanese"
+        },
+        {
+          "value": "ko",
+          "label": "Korean"
+        },
+        {
+          "value": "nl",
+          "label": "Dutch"
+        },
+        {
+          "value": "pl",
+          "label": "Polish"
+        },
+        {
+          "value": "pt",
+          "label": "Portuguese"
+        },
+        {
+          "value": "ru",
+          "label": "Russian"
+        },
+        {
+          "value": "sv",
+          "label": "Swedish"
+        },
+        {
+          "value": "tr",
+          "label": "Turkish"
+        },
+        {
+          "value": "uk",
+          "label": "Ukrainian"
+        },
+        {
+          "value": "ur",
+          "label": "Urdu"
+        },
+        {
+          "value": "vi",
+          "label": "Vietnamese"
+        },
+        {
+          "value": "zh-Hans",
+          "label": "Chinese (simplified)"
+        },
+        {
+          "value": "zh-Hant",
+          "label": "Chinese (traditional)"
+        }
+      ],
+      "group": "labels",
+      "order": 40,
+      "advanced": false,
+      "visibleWhen": {
+        "anyOf": [
+          {
+            "option": "labels",
+            "equals": true
+          },
+          {
+            "option": "context-labels",
+            "equals": true
+          },
+          {
+            "option": "capitals",
+            "in": [
+              "countries",
+              "all"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "label-size",
+      "key": "labelSize",
+      "inRenderSpec": true,
+      "type": "number",
+      "label": "Label size",
+      "description": "Size of region names in pixels; place and neighbour names are a little smaller.",
+      "widget": "number",
+      "default": 11.0,
+      "exclusiveMinimum": 0.0,
+      "step": 0.5,
+      "group": "labels",
+      "order": 50,
+      "advanced": true,
+      "visibleWhen": {
+        "anyOf": [
+          {
+            "option": "labels",
+            "equals": true
+          },
+          {
+            "option": "context-labels",
+            "equals": true
+          },
+          {
+            "option": "capitals",
+            "in": [
+              "countries",
+              "all"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "label-min-scale",
+      "key": "labelMinScale",
+      "inRenderSpec": true,
+      "type": "number",
+      "label": "Smallest label size",
+      "description": "How far labels may shrink to fit, as a share of the label size.",
+      "widget": "number",
+      "default": 0.7,
+      "exclusiveMinimum": 0.0,
+      "maximum": 1.0,
+      "step": 0.05,
+      "group": "labels",
+      "order": 60,
+      "advanced": true,
+      "visibleWhen": {
+        "anyOf": [
+          {
+            "option": "labels",
+            "equals": true
+          },
+          {
+            "option": "context-labels",
+            "equals": true
+          },
+          {
+            "option": "capitals",
+            "in": [
+              "countries",
+              "all"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "leaders",
+      "key": "leaders",
+      "inRenderSpec": true,
+      "type": "boolean",
+      "label": "Leader lines",
+      "description": "Label small regions outside them, with a line.",
+      "widget": "checkbox",
+      "default": true,
+      "group": "labels",
+      "order": 70,
+      "advanced": true,
+      "visibleWhen": {
+        "option": "labels",
+        "equals": true
+      }
+    },
+    {
+      "name": "curved-labels",
+      "key": "curvedLabels",
+      "inRenderSpec": true,
+      "type": "boolean",
+      "label": "Curved labels",
+      "description": "Curve labels along long, thin regions.",
+      "widget": "checkbox",
+      "default": true,
+      "group": "labels",
+      "order": 80,
+      "advanced": true,
+      "visibleWhen": {
+        "anyOf": [
+          {
+            "option": "labels",
+            "equals": true
+          },
+          {
+            "option": "context-labels",
+            "equals": true
+          },
+          {
+            "option": "capitals",
+            "in": [
+              "countries",
+              "all"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "target",
+      "key": "target",
+      "inRenderSpec": true,
+      "type": "string",
+      "label": "Made for",
+      "description": "Wikimedia Commons (curved labels as rotated letters, which its renderer draws) or web pages (textPath).",
+      "widget": "select",
+      "default": "commons",
+      "choices": [
+        {
+          "value": "commons",
+          "label": "Wikimedia Commons"
+        },
+        {
+          "value": "web",
+          "label": "Web pages"
+        }
+      ],
+      "group": "labels",
+      "order": 90,
+      "advanced": true
+    },
+    {
+      "name": "frame",
+      "key": "frame",
+      "inRenderSpec": true,
+      "type": "string",
+      "label": "Frame",
+      "description": "What the map shows: the regions' main landmass, all of them, or the world.",
+      "widget": "select",
+      "default": "auto",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "Main landmass"
+        },
+        {
+          "value": "all",
+          "label": "Everything"
+        },
+        {
+          "value": "world",
+          "label": "World"
+        }
+      ],
+      "group": "frame",
+      "order": 10,
+      "advanced": false
+    },
+    {
+      "name": "bbox",
+      "key": "bbox",
+      "inRenderSpec": true,
+      "type": "string",
+      "label": "Box",
+      "description": "An area to show instead of the frame: west,south,east,north in degrees, or a preset name.",
+      "widget": "bbox",
+      "choicesSource": "/api/v1/bbox-presets",
+      "group": "frame",
+      "order": 20,
+      "advanced": false
+    },
+    {
+      "name": "projection",
+      "key": "projection",
+      "inRenderSpec": true,
+      "type": "string",
+      "label": "Projection",
+      "description": "Automatic picks one suited to the area.",
+      "widget": "select",
+      "default": "auto",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "Automatic"
+        },
+        {
+          "value": "laea",
+          "label": "Lambert azimuthal equal-area"
+        },
+        {
+          "value": "equal-earth",
+          "label": "Equal Earth"
+        },
+        {
+          "value": "albers",
+          "label": "Albers conic"
+        },
+        {
+          "value": "lcc",
+          "label": "Lambert conformal conic"
+        }
+      ],
+      "group": "frame",
+      "order": 30,
+      "advanced": false
+    },
+    {
+      "name": "parallels",
+      "key": "parallels",
+      "inRenderSpec": true,
+      "type": "pair",
+      "label": "Standard parallels",
+      "description": "south,north in degrees, for conic projections. Default: from the area.",
+      "widget": "pair",
+      "minimum": -89.9,
+      "maximum": 89.9,
+      "group": "frame",
+      "order": 40,
+      "advanced": true,
+      "visibleWhen": {
+        "option": "projection",
+        "in": [
+          "albers",
+          "lcc"
+        ]
+      }
+    },
+    {
+      "name": "center-lon",
+      "key": "centerLon",
+      "inRenderSpec": true,
+      "type": "number",
+      "label": "Central meridian",
+      "description": "Longitude at the centre of world maps, in degrees.",
+      "widget": "number",
+      "minimum": -180.0,
+      "maximum": 180.0,
+      "step": 1.0,
+      "group": "frame",
+      "order": 50,
+      "advanced": true
+    },
+    {
+      "name": "insets",
+      "key": "insets",
+      "inRenderSpec": true,
+      "type": "string",
+      "label": "Insets",
+      "description": "Far-away parts (overseas territories, Alaska…) in corner boxes, or left out.",
+      "widget": "select",
+      "default": "auto",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "In corner boxes"
+        },
+        {
+          "value": "none",
+          "label": "Left out"
+        }
+      ],
+      "group": "frame",
+      "order": 60,
+      "advanced": false
+    },
+    {
+      "name": "max-insets",
+      "key": "maxInsets",
+      "inRenderSpec": true,
+      "type": "integer",
+      "label": "Most insets",
+      "description": "At most this many corner boxes.",
+      "widget": "number",
+      "default": 6,
+      "minimum": 0.0,
+      "maximum": 20.0,
+      "step": 1.0,
+      "group": "frame",
+      "order": 70,
+      "advanced": true,
+      "visibleWhen": {
+        "option": "insets",
+        "equals": "auto"
+      }
+    },
+    {
+      "name": "margin",
+      "key": "margin",
+      "inRenderSpec": true,
+      "type": "number",
+      "label": "Margin",
+      "description": "Room around the frame, as a share of its size.",
+      "widget": "number",
+      "default": 0.04,
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "step": 0.01,
+      "group": "frame",
+      "order": 80,
+      "advanced": true
+    },
+    {
+      "name": "worldview",
+      "key": "worldview",
+      "inRenderSpec": false,
+      "type": "string",
+      "label": "Point of view",
+      "description": "A Natural Earth point of view on disputed borders (country code). Default: de facto.",
+      "widget": "select",
+      "choicesSource": "/api/v1/datasets",
+      "group": "borders",
+      "order": 10,
+      "advanced": false
+    },
+    {
+      "name": "border-mode",
+      "key": "borderMode",
+      "inRenderSpec": true,
+      "type": "string",
+      "label": "Border drawing",
+      "description": "Borders drawn once in their own layer, or each region stroking its own outline (for hover effects).",
+      "widget": "select",
+      "default": "layer",
+      "choices": [
+        {
+          "value": "layer",
+          "label": "Once, by kind"
+        },
+        {
+          "value": "regions",
+          "label": "Around each region"
+        }
+      ],
+      "group": "borders",
+      "order": 20,
+      "advanced": true
+    },
+    {
+      "name": "border-width",
+      "key": "borderWidth",
+      "inRenderSpec": true,
+      "type": "number",
+      "label": "Border width",
+      "description": "Borders between mapped regions, in pixels.",
+      "widget": "number",
+      "default": 0.5,
+      "exclusiveMinimum": 0.0,
+      "step": 0.1,
+      "group": "borders",
+      "order": 30,
+      "advanced": true
+    },
+    {
+      "name": "parent-border-width",
+      "key": "parentBorderWidth",
+      "inRenderSpec": true,
+      "type": "number",
+      "label": "Parent border width",
+      "description": "Borders between regions of different parents (régions, states), in pixels.",
+      "widget": "number",
+      "default": 1.0,
+      "exclusiveMinimum": 0.0,
+      "step": 0.1,
+      "group": "borders",
+      "order": 40,
+      "advanced": true
+    },
+    {
+      "name": "outline-width",
+      "key": "outlineWidth",
+      "inRenderSpec": true,
+      "type": "number",
+      "label": "Outline width",
+      "description": "The outer edge of the mapped regions, in pixels.",
+      "widget": "number",
+      "default": 0.8,
+      "exclusiveMinimum": 0.0,
+      "step": 0.1,
+      "group": "borders",
+      "order": 50,
+      "advanced": true
+    },
+    {
+      "name": "context-border-width",
+      "key": "contextBorderWidth",
+      "inRenderSpec": true,
+      "type": "number",
+      "label": "Neighbour border width",
+      "description": "Borders between neighbouring countries, in pixels.",
+      "widget": "number",
+      "default": 0.4,
+      "exclusiveMinimum": 0.0,
+      "step": 0.1,
+      "group": "borders",
+      "order": 60,
+      "advanced": true
+    },
+    {
+      "name": "disputed-border-width",
+      "key": "disputedBorderWidth",
+      "inRenderSpec": true,
+      "type": "number",
+      "label": "Disputed border width",
+      "description": "Disputed and claimed boundaries, in pixels.",
+      "widget": "number",
+      "default": 0.8,
+      "exclusiveMinimum": 0.0,
+      "step": 0.1,
+      "group": "borders",
+      "order": 70,
+      "advanced": true
+    },
+    {
+      "name": "credit",
+      "key": "credit",
+      "inRenderSpec": true,
+      "type": "boolean",
+      "label": "Credit on the map",
+      "description": "Draw the data credit in a corner (it is always in the file).",
+      "widget": "checkbox",
+      "default": false,
+      "group": "credit",
+      "order": 10,
+      "advanced": false
+    },
+    {
+      "name": "attribution",
+      "key": "attribution",
+      "inRenderSpec": true,
+      "type": "string",
+      "label": "Data credit",
+      "description": "Replaces the credit taken from the data.",
+      "widget": "text",
+      "maxLength": 500,
+      "group": "credit",
+      "order": 20,
+      "advanced": true
+    },
+    {
+      "name": "boundary-year",
+      "key": "boundaryYear",
+      "inRenderSpec": true,
+      "type": "string",
+      "label": "Boundary year",
+      "description": "Year the boundaries represent. Default: from the data.",
+      "widget": "text",
+      "maxLength": 40,
+      "group": "credit",
+      "order": 30,
+      "advanced": true
+    },
+    {
+      "name": "source-release",
+      "key": "sourceRelease",
+      "inRenderSpec": true,
+      "type": "string",
+      "label": "Source release",
+      "description": "Release of the boundary data. Default: the hosted one.",
+      "widget": "text",
+      "maxLength": 200,
+      "group": "credit",
+      "order": 40,
+      "advanced": true
+    },
+    {
+      "name": "precision",
+      "key": "precision",
+      "inRenderSpec": true,
+      "type": "integer",
+      "label": "Coordinate decimals",
+      "description": "Decimal places in path coordinates.",
+      "widget": "number",
+      "default": 1,
+      "minimum": 0.0,
+      "maximum": 6.0,
+      "step": 1.0,
+      "group": "output",
+      "order": 10,
+      "advanced": true
+    },
+    {
+      "name": "simplify",
+      "key": "simplify",
+      "inRenderSpec": true,
+      "type": "number",
+      "label": "Simplification",
+      "description": "Drop detail smaller than this many pixels.",
+      "widget": "number",
+      "default": 0.5,
+      "minimum": 0.0,
+      "step": 0.1,
+      "group": "output",
+      "order": 20,
+      "advanced": true
+    },
+    {
+      "name": "min-area",
+      "key": "minArea",
+      "inRenderSpec": true,
+      "type": "number",
+      "label": "Smallest island",
+      "description": "Drop islands and lakes smaller than this many square pixels.",
+      "widget": "number",
+      "default": 0.5,
+      "minimum": 0.0,
+      "step": 0.5,
+      "group": "output",
+      "order": 30,
+      "advanced": true
+    },
+    {
+      "name": "snap",
+      "key": "snap",
+      "inRenderSpec": true,
+      "type": "number",
+      "label": "Snap",
+      "description": "Snap neighbours within this many pixels onto the outline.",
+      "widget": "number",
+      "default": 2.0,
+      "minimum": 0.0,
+      "step": 0.5,
+      "group": "output",
+      "order": 40,
+      "advanced": true
+    },
+    {
+      "name": "css-vars",
+      "key": "cssVars",
+      "inRenderSpec": true,
+      "type": "boolean",
+      "label": "CSS variables",
+      "description": "Colours as var(--mg-<slot>, …), to restyle from a page.",
+      "widget": "checkbox",
+      "default": false,
+      "group": "output",
+      "order": 50,
+      "advanced": true
+    }
+  ],
+  "colorSlots": [
+    {
+      "slot": "background",
+      "name": "color-background",
+      "key": "background",
+      "label": "Background",
+      "description": "Behind everything, outside the map",
+      "default": "#ffffff"
+    },
+    {
+      "slot": "water",
+      "name": "color-water",
+      "key": "water",
+      "label": "Water",
+      "description": "Seas and oceans",
+      "default": "#c6ecff"
+    },
+    {
+      "slot": "land",
+      "name": "color-land",
+      "key": "land",
+      "label": "Mapped regions",
+      "description": "The regions the map is about",
+      "default": "#fefee9"
+    },
+    {
+      "slot": "context-land",
+      "name": "color-context-land",
+      "key": "contextLand",
+      "label": "Neighbours",
+      "description": "Countries around the mapped regions",
+      "default": "#f6e1b9"
+    },
+    {
+      "slot": "border",
+      "name": "color-border",
+      "key": "border",
+      "label": "Borders",
+      "description": "Borders between mapped regions",
+      "default": "#646464"
+    },
+    {
+      "slot": "outline",
+      "name": "color-outline",
+      "key": "outline",
+      "label": "Outline",
+      "description": "The outer edge of the mapped regions",
+      "default": "#646464"
+    },
+    {
+      "slot": "coast",
+      "name": "color-coast",
+      "key": "coast",
+      "label": "Coast",
+      "description": "Where mapped regions meet water",
+      "default": "#0978ab"
+    },
+    {
+      "slot": "context-border",
+      "name": "color-context-border",
+      "key": "contextBorder",
+      "label": "Neighbour borders",
+      "description": "Borders between neighbouring countries",
+      "default": "#a08070"
+    },
+    {
+      "slot": "lake-border",
+      "name": "color-lake-border",
+      "key": "lakeBorder",
+      "label": "Lake shores",
+      "description": "Outlines of lakes",
+      "default": "#0978ab"
+    },
+    {
+      "slot": "disputed-border",
+      "name": "color-disputed-border",
+      "key": "disputedBorder",
+      "label": "Disputed borders",
+      "description": "Disputed and claimed boundaries, dashed",
+      "default": "#646464"
+    },
+    {
+      "slot": "label",
+      "name": "color-label",
+      "key": "label",
+      "label": "Labels",
+      "description": "Names, the title, caption and credit",
+      "default": "#333333"
+    }
+  ],
+  "themesSource": "/api/v1/themes",
+  "excluded": [
+    {
+      "name": "region",
+      "reason": "part of the path: /maps/{dataset}/{region}.svg"
+    },
+    {
+      "name": "regions",
+      "reason": "part of the path: /maps/{dataset}/FRA,DEU.svg"
+    },
+    {
+      "name": "format",
+      "reason": "the path's extension: .svg, .json or .html"
+    },
+    {
+      "name": "release",
+      "reason": "pins the URL to a dataset release (see /datasets); not a map setting"
+    },
+    {
+      "name": "dissolve",
+      "reason": "needs a data-unit table, which only the WASM API and the CLI take"
+    }
+  ]
+}

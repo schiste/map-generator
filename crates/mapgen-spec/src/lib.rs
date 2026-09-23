@@ -14,6 +14,7 @@ use mapgen_core::{
 use mapgen_data::{LayerQuery, Source};
 use serde::{Deserialize, Serialize};
 
+pub mod options;
 pub mod params;
 pub mod recipe;
 

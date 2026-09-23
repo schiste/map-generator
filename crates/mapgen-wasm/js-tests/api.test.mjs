@@ -11,7 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..", "..", "..");
 const require = createRequire(import.meta.url);
 const mapgen = require(join(here, "..", "pkg", "node", "mapgen_wasm.js"));
-const { MapGenerator, themes, bboxPresets, version, reshape, parseRecipe, recipeToCsv } = mapgen;
+const { MapGenerator, themes, bboxPresets, version, reshape, parseRecipe, recipeToCsv, renderOptions } = mapgen;
 
 const fixtures = join(repo, "crates", "mapgen-data", "tests", "fixtures");
 const read = (p) => readFileSync(p, "utf8");
@@ -108,6 +108,24 @@ test("lookup tables and version", () => {
   assert.deepEqual(bboxPresets().europe, [-25, 34, 45, 72]);
   const pkg = JSON.parse(read(join(here, "..", "pkg", "node", "package.json")));
   assert.equal(version(), pkg.version);
+});
+
+test("render options describe every setting, and each renders", () => {
+  const d = renderOptions();
+  assert.equal(d.version, 1);
+  const byName = Object.fromEntries(d.options.map((o) => [o.name, o]));
+  assert.equal(byName.projection.widget, "select");
+  assert.deepEqual(byName.projection.choices.map((c) => c.value), ["auto", "laea", "equal-earth", "albers", "lcc"]);
+  assert.deepEqual(byName.parallels.visibleWhen, { option: "projection", in: ["albers", "lcc"] });
+  assert.equal(byName.width.maximum, 20000);
+  assert.equal(d.colorSlots.find((s) => s.slot === "water").default, themes().wikimedia.water);
+  // Every default and choice renders (RenderSpec members only).
+  const gen = twinGenerator();
+  for (const o of d.options.filter((o) => o.inRenderSpec)) {
+    for (const value of [o.default, ...(o.choices ?? []).map((c) => c.value)].filter((v) => v !== undefined)) {
+      assert.doesNotThrow(() => gen.render({ [o.key]: value }), `${o.key}=${JSON.stringify(value)}`);
+    }
+  }
 });
 
 test("TypeScript definitions declare the typed API", () => {

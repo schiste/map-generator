@@ -39,7 +39,7 @@ const CLIENT: &str = include_str!("../assets/client.js");
 const BODY_LIMIT: usize = 5 * 1024 * 1024;
 
 /// Every route, as documented in `openapi.json` (checked by a test).
-pub const ROUTES: [&str; 17] = [
+pub const ROUTES: [&str; 18] = [
     "/api/v1/",
     "/api/v1/openapi.json",
     "/api/v1/client.js",
@@ -47,6 +47,7 @@ pub const ROUTES: [&str; 17] = [
     "/api/v1/version",
     "/api/v1/themes",
     "/api/v1/bbox-presets",
+    "/api/v1/render-options",
     "/api/v1/datasets",
     "/api/v1/datasets/{dataset}/regions",
     "/api/v1/datasets/{dataset}/regions/{region}/features",
@@ -84,6 +85,7 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/api/v1/version", get(version))
         .route("/api/v1/themes", get(themes))
         .route("/api/v1/bbox-presets", get(bbox_presets))
+        .route("/api/v1/render-options", get(render_options))
         .route("/api/v1/datasets", get(datasets))
         .route("/api/v1/datasets/{dataset}/regions", get(regions))
         .route(
@@ -205,6 +207,7 @@ async fn index() -> Json<Value> {
             "version": "/api/v1/version",
             "themes": "/api/v1/themes",
             "bboxPresets": "/api/v1/bbox-presets",
+            "renderOptions": "/api/v1/render-options",
             "datasets": "/api/v1/datasets",
             "regions": "/api/v1/datasets/{dataset}/regions",
             "features": "/api/v1/datasets/{dataset}/regions/{region}/features",
@@ -266,6 +269,11 @@ async fn themes() -> Json<Value> {
 
 async fn bbox_presets() -> Json<Value> {
     Json(json!(bbox_table()))
+}
+
+/// Every map setting, described for settings forms (`options.rs`).
+async fn render_options(State(s): St) -> Json<Value> {
+    Json(json!(mapgen_spec::options::describe(s.settings.max_width)))
 }
 
 async fn contract_fixture() -> impl IntoResponse {

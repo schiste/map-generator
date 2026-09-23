@@ -109,6 +109,11 @@ export class MapgenClient {
     return this.#request("/themes");
   }
 
+  /** Every map setting, with type, widget, default, choices, limits, group and conditions. */
+  renderOptions() {
+    return this.#request("/render-options");
+  }
+
   version() {
     return this.#request("/version");
   }

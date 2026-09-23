@@ -42,6 +42,7 @@ const regions = await api.features("ne-admin1", "FRA"); // codes, names, parents
 | `GET /api/v1/health` | `200` when the data is loaded |
 | `GET /api/v1/version` | mapgen version, commit, SVG contract version, dataset releases |
 | `GET /api/v1/themes`, `/bbox-presets` | Colour themes and slots; frame presets |
+| `GET /api/v1/render-options` | Every map setting, described for settings forms ([below](#render-options)) |
 | `GET /api/v1/datasets` | Hosted datasets: level, licence, share-alike, release, boundary year, points of view, languages |
 | `GET /api/v1/datasets/{dataset}/regions` | What a map can be made for: countries, continents, `world`… with each one's licence |
 | `GET /api/v1/datasets/{dataset}/regions/{region}/features` | The map's regions without geometry: `code`, `name`, `names` (`?languages=fr,zh-Hant`), `parent`, `parentName`, `country` |
@@ -93,6 +94,71 @@ The `.json` metadata:
 - `sha1`, `credit`, `licence`, `licenceUrl`, `shareAlike`;
 - `boundaryYear`, `sourceRelease`, `release`;
 - `contract`, and `url` (the canonical URL).
+
+### Render options
+
+`GET /api/v1/render-options` describes every map setting, so a client can build its settings
+form from the API rather than keep its own list. The same table types the query parameters
+and generates `openapi.json`, and tests check it against what the API accepts, so it can't
+fall behind. (`renderOptions()` in the WebAssembly build returns the same, without the host's
+width limit.)
+
+```json
+{
+  "version": 1,
+  "groups": [{ "id": "map", "label": "Map", "order": 10 }, …],
+  "options": [
+    {
+      "name": "projection", "key": "projection", "inRenderSpec": true,
+      "type": "string", "widget": "select", "label": "Projection",
+      "description": "Automatic picks one suited to the area.", "default": "auto",
+      "choices": [{ "value": "auto", "label": "Automatic" }, …],
+      "group": "frame", "order": 30, "advanced": false
+    },
+    {
+      "name": "parallels", "type": "pair", "widget": "pair", "advanced": true,
+      "visibleWhen": { "option": "projection", "in": ["albers", "lcc"] }, …
+    }
+  ],
+  "colorSlots": [{ "slot": "water", "name": "color-water", "key": "water", "label": "Water", "description": "Seas and oceans", "default": "#c6ecff" }, …],
+  "themesSource": "/api/v1/themes",
+  "excluded": [{ "name": "region", "reason": "part of the path: …" }, …]
+}
+```
+
+- `name` is the query parameter and recipe key; `key` the `RenderSpec` member (for
+  `POST /render` and WebAssembly). `worldview` has `inRenderSpec: false`: it is a query
+  parameter and recipe key only.
+- `type`: `boolean`, `integer`, `number`, `string`, `list` (comma-separated) or `pair` (two
+  comma-separated numbers). `widget`: `checkbox`, `select`, `number`, `text`, `textarea`,
+  `tokens`, `bbox` or `pair`.
+- `choices` are the only values accepted; `choicesSource` names the endpoint that lists them
+  (`/themes`, `/bbox-presets`, `/datasets` for points of view); `suggestions` are common values
+  of an open list (`languages`).
+- `minimum`, `exclusiveMinimum`, `maximum`, `step` and `maxLength` are the limits the API
+  enforces (`step` is a hint). `width`'s maximum is this host's.
+- `visibleWhen` says when a setting applies: `{option, equals}`, `{option, in}`,
+  `{option, notEmpty}` or `{anyOf: [...]}`. Options marked `advanced` belong in a collapsed
+  section.
+- Colours are `colorSlots`, with the default theme's colours; each theme's are at
+  `/api/v1/themes`.
+- `excluded` lists the map endpoint's other parameters and why they aren't settings.
+
+The shape can gain fields within `version` 1; ignore what you don't recognise. A form in a
+few lines:
+
+```js
+const { options, groups } = await api.renderOptions();
+for (const group of groups) {
+  for (const o of options.filter((o) => o.group === group.id && !o.advanced)) {
+    const input = o.widget === "select"
+      ? select(o.choices.map((c) => [c.value, c.label]), o.default)
+      : o.widget === "checkbox" ? checkbox(o.default) : textInput(o);
+    field(o.label, o.description, input); // render labels as text, never HTML
+  }
+}
+// Values go back as query parameters, `name=value`, or as `{ [o.key]: value }`.
+```
 
 ### Data joins
 

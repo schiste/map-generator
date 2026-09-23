@@ -186,6 +186,53 @@ export interface MapGenerator {
   matchCodes(spec: MatchSpec): MatchOutput;
 }
 
+/** When a render option applies (docs/api.md#render-options). */
+export type RenderOptionCondition =
+  | { option: string; equals: unknown }
+  | { option: string; in: unknown[] }
+  | { option: string; notEmpty: true }
+  | { anyOf: RenderOptionCondition[] };
+
+/** One map setting, described for settings forms. */
+export interface RenderOption {
+  /** Query parameter and recipe key, e.g. "label-size". */
+  name: string;
+  /** RenderSpec member, e.g. "labelSize". */
+  key: string;
+  /** False for `worldview` (a query parameter and recipe key, not a RenderSpec member). */
+  inRenderSpec: boolean;
+  type: "boolean" | "integer" | "number" | "string" | "list" | "pair";
+  label: string;
+  description: string;
+  widget: "checkbox" | "select" | "number" | "text" | "textarea" | "tokens" | "bbox" | "pair";
+  default?: unknown;
+  /** The only values accepted. */
+  choices?: { value: unknown; label: string }[];
+  /** An API endpoint listing the values, e.g. "/api/v1/themes". */
+  choicesSource?: string;
+  /** Common values; others are accepted. */
+  suggestions?: { value: unknown; label: string }[];
+  minimum?: number;
+  exclusiveMinimum?: number;
+  maximum?: number;
+  step?: number;
+  maxLength?: number;
+  group: string;
+  order: number;
+  advanced: boolean;
+  visibleWhen?: RenderOptionCondition;
+}
+
+export interface RenderOptionsDescription {
+  version: number;
+  groups: { id: string; label: string; order: number }[];
+  options: RenderOption[];
+  colorSlots: { slot: string; name: string; key: string; label: string; description: string; default: string }[];
+  themesSource: string;
+  /** Parameters of the map endpoint that are not map settings, and why. */
+  excluded: { name: string; reason: string }[];
+}
+
 export interface Subdivision {
   /** Code, e.g. "FR-75". */
   code: string;
@@ -634,6 +681,13 @@ fn load_optional(
 #[wasm_bindgen(unchecked_return_type = "Record<string, Record<string, string>>")]
 pub fn themes() -> Result<JsValue, JsError> {
     to_js(&theme_table())
+}
+
+/// Every map setting, described for settings forms (as the API's
+/// `/render-options`, without the host's width limit).
+#[wasm_bindgen(js_name = renderOptions, unchecked_return_type = "RenderOptionsDescription")]
+pub fn render_options() -> Result<JsValue, JsError> {
+    to_js(&spec::options::describe(20_000))
 }
 
 /// Frame presets: `{ name: [west, south, east, north] }`.
