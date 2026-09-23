@@ -32,6 +32,8 @@ render_params = [
     ("source-release", "string", "Dataset release (default: the hosted one)."),
     ("theme", "string", "`wikimedia` (default), `light`, `dark` or `mono`."),
     ("labels", "boolean", "Label the regions."),
+    ("context-labels", "boolean", "Name the neighbouring countries, where room is left."),
+    ("capitals", "string", "`none` (default), `countries` (national capitals) or `all` (also regional capitals inside the map)."),
     ("languages", "string", "Also label in these languages (comma-separated BCP 47 tags)."),
     ("target", "string", "`commons` (default for SVG; curved labels as rotated letters, for librsvg) or `web` (textPath)."),
     ("border-mode", "string", "`layer` (default) or `regions`."),

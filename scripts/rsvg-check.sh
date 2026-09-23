@@ -38,6 +38,7 @@ CASES=(
   "japan-zh-tw|japan-light.svg|zh-TW"            # region tag picks zh-Hant
   "kashmir-ind|kashmir-ind.svg|"                 # hatch pattern, disputed borders
   "fiji|fiji.svg|"                               # --css-vars: var() with fallbacks
+  "italy-capitals|italy-capitals.svg|"           # capitals (circles), neighbour names
 )
 
 failed=0

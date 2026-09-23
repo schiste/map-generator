@@ -8,7 +8,7 @@ use mapgen_core::CONTRACT_VERSION;
 use roxmltree::{Document, Node};
 
 /// Layer groups of the main map, bottom to top.
-const LAYERS: [&str; 9] = [
+const LAYERS: [&str; 10] = [
     "background",
     "water",
     "context",
@@ -17,6 +17,7 @@ const LAYERS: [&str; 9] = [
     "lakes",
     "disputed-areas",
     "borders",
+    "places",
     "labels",
 ];
 

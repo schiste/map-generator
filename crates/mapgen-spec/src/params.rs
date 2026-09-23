@@ -29,10 +29,11 @@ fn err(param: &str, why: &str) -> ParamError {
     }
 }
 
-const BOOLS: [&str; 7] = [
+const BOOLS: [&str; 8] = [
     "showTitle",
     "credit",
     "labels",
+    "contextLabels",
     "dissolve",
     "leaders",
     "curvedLabels",

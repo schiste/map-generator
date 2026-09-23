@@ -203,6 +203,79 @@ pub fn place_labels_around(
     labels
 }
 
+/// The box a label covers, `[min_x, min_y, max_x, max_y]` in pixels (for
+/// reserving it when placing other labels).
+pub(crate) fn label_box(l: &Label) -> [f64; 4] {
+    match &l.shape {
+        LabelShape::Curved { path } => {
+            let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+            for &(x, y) in path {
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+            }
+            let h = 0.6 * l.size;
+            [x0, y0 - h, x1, y1 + h]
+        }
+        _ => {
+            let (w, h) = (text_width(&l.text, l.size) / 2.0, 0.6 * l.size);
+            [l.x - w, l.y - h, l.x + w, l.y + h]
+        }
+    }
+}
+
+/// Names next to points (capitals): to the right, left, above or below the
+/// dot, in `order`, where clear of `reserved` boxes and earlier names, and
+/// inside `bounds`. `feature` of each label is the point's index.
+pub fn place_point_labels(
+    points: &[(&str, (f64, f64))],
+    order: &[usize],
+    size: f64,
+    bounds: [f64; 4],
+    reserved: &[[f64; 4]],
+) -> Vec<Label> {
+    let mut placed: RTree<Rectangle<[f64; 2]>> = RTree::bulk_load(
+        reserved
+            .iter()
+            .map(|r| Rectangle::from_corners([r[0], r[1]], [r[2], r[3]]))
+            .collect(),
+    );
+    let mut labels = Vec::new();
+    for &i in order {
+        let (text, (px, py)) = points[i];
+        if text.trim().is_empty() {
+            continue;
+        }
+        let (w, h) = (text_width(text, size), 1.2 * size);
+        let gap = 0.45 * size;
+        let candidates = [
+            (px + gap + w / 2.0, py),
+            (px - gap - w / 2.0, py),
+            (px, py - gap - h / 2.0),
+            (px, py + gap + h / 2.0),
+        ];
+        for (x, y) in candidates {
+            let inside = x - w / 2.0 >= bounds[0] + 1.0
+                && x + w / 2.0 <= bounds[2] - 1.0
+                && y - h / 2.0 >= bounds[1] + 1.0
+                && y + h / 2.0 <= bounds[3] - 1.0;
+            let b = boxed(x, y, w, h);
+            if inside && !collides(&placed, &b) {
+                placed.insert(b);
+                labels.push(Label {
+                    feature: i,
+                    text: text.to_owned(),
+                    x,
+                    y,
+                    size,
+                    shape: LabelShape::Straight,
+                });
+                break;
+            }
+        }
+    }
+    labels.sort_by_key(|l| l.feature);
+    labels
+}
+
 fn boxed(x: f64, y: f64, w: f64, h: f64) -> Rectangle<[f64; 2]> {
     Rectangle::from_corners([x - w / 2.0, y - h / 2.0], [x + w / 2.0, y + h / 2.0])
 }

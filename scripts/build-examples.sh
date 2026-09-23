@@ -43,6 +43,10 @@ for view in IND PAK; do
     --labels --width 600 --title "Kashmir ($view view)" \
     -o "$E/kashmir-$(echo "$view" | tr '[:upper:]' '[:lower:]').svg"
 done
+# Capitals (national and regional) and the names of neighbouring countries.
+$M render -i "$D/ne_10m_admin_1.geojson" --dataset ne-admin1 --region ITA "${CTX[@]}" \
+  --places "$D/ne_10m_capitals.geojson" --capitals all --context-labels \
+  --width 700 --title "Italy — capitals" -o "$E/italy-capitals.svg"
 # Colours as CSS custom properties (restyle from a page's CSS; librsvg reads the fallbacks).
 $M render -i "$D/ne_10m_admin_1.geojson" --dataset ne-admin1 --region FJI "${CTX[@]}" \
   --css-vars --width 500 --title "Fiji (straddles 180°)" -o "$E/fiji.svg"

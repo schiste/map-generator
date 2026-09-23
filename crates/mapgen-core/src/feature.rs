@@ -49,6 +49,29 @@ impl Default for MapFeature {
     }
 }
 
+/// A place drawn as a point, such as a capital.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapPlace {
+    pub id: String,
+    pub name: String,
+    /// Names in other languages, as `MapFeature::names`.
+    pub names: BTreeMap<String, String>,
+    pub kind: PlaceKind,
+    /// Lowercase ISO 3166-1 alpha-2 code of its country.
+    pub country: Option<String>,
+    pub wikidata: Option<String>,
+    pub lon: f64,
+    pub lat: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PlaceKind {
+    /// A country's capital.
+    CountryCapital,
+    /// The capital of a state, province or region.
+    RegionCapital,
+}
+
 /// A line feature, such as a disputed boundary.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapLine {

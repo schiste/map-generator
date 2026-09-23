@@ -36,6 +36,7 @@ Main-map groups, bottom to top, by `id` (a group is absent when empty):
 | `lakes` | lakes |
 | `disputed-areas` | hatched disputed areas |
 | `borders` | borders, one path per kind |
+| `places` | capitals, when drawn (`capitals`) |
 | `labels` | labels |
 
 Insets are `g.mg-inset` groups (ids `inset-1`, `inset-2`…) after the main layers. They
@@ -57,6 +58,14 @@ or an inset's `.mg-land`, with:
 | `class` | `mg-land`, the feature class (`subdivision`, `country`, `region`…), and the lowercase ISO 3166-1 alpha-2 code of its country (`fr`) when known |
 
 Each region has a `<title>` child for tooltips ("Lancaster, Nebraska").
+
+### Capitals and neighbour names
+With `capitals`, each capital is a `circle.mg-place` in `#places`, with the class
+`mg-capital` (national) or `mg-region-capital`, and `data-name`, `data-country` (lowercase
+ISO 3166-1 alpha-2) and `data-wikidata` when known, plus a `<title>`. Regional capitals are
+drawn only inside the mapped regions. Their names are `text.mg-place-label`, and with
+`context-labels` the names of neighbouring countries are `text.mg-context-label`, both in
+`#labels` after the region labels (`text.mg-label`). Colouring tools should leave them alone.
 
 Neighbouring countries are `path.mg-context` in `#context` (or `.mg-context`), with the same
 attributes.

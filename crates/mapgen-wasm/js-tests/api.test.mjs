@@ -218,6 +218,26 @@ test("parity: Japan labelled in four languages", { skip: skipUnless(hasNE) }, ()
   assert.equal(out.svg, read(join(examples, "japan-light.svg")));
 });
 
+const capitalsFile = join(data, "ne_10m_capitals.geojson");
+test("parity: Italy with capitals and neighbour names", { skip: skipUnless(hasNE && existsSync(capitalsFile)) }, () => {
+  const gen = withContext(ne.admin1, { dataset: "ne-admin1" });
+  assert.ok(gen.setPlaces(read(capitalsFile), ["de"]) > 2000);
+  const out = gen.render({
+    region: "ITA",
+    capitals: "all",
+    contextLabels: true,
+    width: 700,
+    title: "Italy — capitals",
+  });
+  assert.match(out.svg, /<circle class="mg-place mg-capital"[^>]*data-name="Rome"[^>]*data-wikidata="Q220"/);
+  assert.equal(out.svg, read(join(examples, "italy-capitals.svg")));
+  // Names follow the viewer's language like region labels.
+  const de = gen.render({ region: "ITA", capitals: "countries", languages: ["de"], width: 700 });
+  assert.match(de.svg, /<text systemLanguage="de" class="mg-place-label"[^>]*>Rom</);
+  assert.equal(gen.setPlaces(), 0);
+  assert.doesNotMatch(gen.render({ region: "ITA", capitals: "all" }).svg, /mg-place/);
+});
+
 test("parity: Fiji with CSS custom properties", { skip: skipUnless(hasNE) }, () => {
   const out = withContext(ne.admin1, { dataset: "ne-admin1" }).render({
     region: "FJI",

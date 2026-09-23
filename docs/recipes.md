@@ -53,6 +53,8 @@ projection,laea
 | `theme` | `wikimedia`, `light`, `dark`, `mono` |
 | `color-<slot>` | any CSS colour. Slots: `background`, `water`, `land`, `context-land`, `border`, `outline`, `coast`, `context-border`, `lake-border`, `disputed-border`, `label` |
 | `labels`, `credit`, `css-vars`, `leaders`, `curved-labels` | `true` / `false` |
+| `context-labels` | `true`: name the neighbouring countries |
+| `capitals` | `none`, `countries` (national capitals) or `all` (also regional capitals inside the map) |
 | `languages` | BCP 47 tags, e.g. `fr;ar;zh-Hans` |
 | `target` | `commons` (curved labels as rotated letters; for Wikimedia Commons) or `web` |
 | `projection` | `auto`, `laea`, `equal-earth`, `albers`, `lcc` (and `parallels`, e.g. `29.5;45.5`) |

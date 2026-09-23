@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use mapgen_core::MapFeature;
+use mapgen_core::{MapFeature, MapPlace};
 use mapgen_data::join::CrosswalkRow;
 use mapgen_spec::{Dataset as Preset, LayerSpec, LoadedLayer, LoadedLines};
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,8 @@ pub struct ContextConfig {
     /// Disputed boundary lines (GeoJSON).
     pub disputed: Option<String>,
     pub disputed_areas: Option<String>,
+    /// Capitals: Natural Earth populated places (GeoJSON).
+    pub places: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -118,6 +120,7 @@ pub struct Registry {
     pub lakes: Option<LoadedLayer>,
     pub disputed: Option<LoadedLines>,
     pub disputed_areas: Option<LoadedLayer>,
+    pub places: Option<Vec<MapPlace>>,
     /// Point-of-view variants of the countries, loaded on first use.
     worldviews: Mutex<BTreeMap<String, Arc<LoadedLayer>>>,
     pub crosswalks: BTreeMap<String, Crosswalk>,
@@ -185,6 +188,17 @@ impl Registry {
             .as_ref()
             .map(at)
             .map(|p| layer(&p, Preset::NeDisputedAreas))
+            .transpose()?;
+        let places = config
+            .context
+            .places
+            .as_ref()
+            .map(at)
+            .map(|p| {
+                let languages: Vec<String> = NE_LANGUAGES.iter().map(|l| l.to_string()).collect();
+                mapgen_data::places::read_places(&p, &languages)
+                    .map_err(|e| format!("{}: {e}", p.display()))
+            })
             .transpose()?;
         let disputed = config
             .context
@@ -256,6 +270,7 @@ impl Registry {
             lakes,
             disputed,
             disputed_areas,
+            places,
             worldviews: Mutex::new(BTreeMap::new()),
             crosswalks: load_crosswalks(&dir.join("crosswalks"))?,
         })

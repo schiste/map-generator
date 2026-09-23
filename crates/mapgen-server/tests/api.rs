@@ -604,8 +604,13 @@ async fn regions_by_iso2_and_names_in_other_languages() {
     )
     .unwrap();
     std::fs::write(
+        dir.join("capitals.geojson"),
+        r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"FEATURECLA":"Admin-0 capital","NAME":"Berlin","NAME_FR":"Berlin","ADM0_A3":"DEU","WIKIDATAID":"Q64","NE_ID":1},"geometry":{"type":"Point","coordinates":[10.5,45.5]}}]}"#,
+    )
+    .unwrap();
+    std::fs::write(
         dir.join("datasets.toml"),
-        "[context]\ncountries = \"countries.geojson\"\n\n[[dataset]]\nid = \"countries\"\ntitle = \"Countries\"\npreset = \"ne-admin0\"\nfile = \"countries.geojson\"\n",
+        "[context]\ncountries = \"countries.geojson\"\nplaces = \"capitals.geojson\"\n\n[[dataset]]\nid = \"countries\"\ntitle = \"Countries\"\npreset = \"ne-admin0\"\nfile = \"countries.geojson\"\n",
     )
     .unwrap();
     let settings = Settings {
@@ -632,6 +637,11 @@ async fn regions_by_iso2_and_names_in_other_languages() {
             "{path}"
         );
     }
+    let r = get(&app, "/api/v1/maps/countries/DEU.svg?capitals=countries").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert!(r.text().contains("data-wikidata=\"Q64\""), "capitals from datasets.toml");
+    let bad = get(&app, "/api/v1/maps/countries/DEU.svg?capitals=towns").await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
     assert_eq!(
         get(&app, "/api/v1/maps/countries/Atlantis.svg")
             .await

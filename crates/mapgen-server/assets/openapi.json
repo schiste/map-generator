@@ -393,6 +393,22 @@
       "description": "Label the regions."
      },
      {
+      "name": "context-labels",
+      "in": "query",
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Name the neighbouring countries, where room is left."
+     },
+     {
+      "name": "capitals",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "`none` (default), `countries` (national capitals) or `all` (also regional capitals inside the map)."
+     },
+     {
       "name": "languages",
       "in": "query",
       "schema": {

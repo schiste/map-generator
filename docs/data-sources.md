@@ -66,6 +66,13 @@ with a hatched fill and dashed outline (`mg-disputed-area`) with `--disputed-are
 carry Natural Earth's note ("Jammu and Kashmir — Admin. by India; Claimed by Pakistan").
 Disputed areas get no country class, so colouring tools don't assign them to either side.
 
+## Natural Earth capitals (public domain)
+
+`ne_10m_populated_places`, filtered by `ne-geojson` to its national and regional capitals
+(`data/ne_10m_capitals.geojson`: names in Natural Earth's languages, country, Wikidata item).
+Drawn with `--places data/ne_10m_capitals.geojson --capitals countries|all`; regional
+capitals only inside the mapped regions.
+
 ## Natural Earth disputed boundaries (public domain)
 
 `ne_10m_admin_0_boundary_lines_disputed_areas` (fetched by `ne-geojson` as

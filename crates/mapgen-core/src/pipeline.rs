@@ -6,7 +6,7 @@ use rstar::primitives::{GeomWithData, Rectangle};
 use rstar::RTree;
 
 use crate::error::{Error, Result};
-use crate::feature::{MapFeature, MapLine};
+use crate::feature::{MapFeature, MapLine, MapPlace};
 use crate::frame::{anchor as frame_anchor, clusters, Cluster, FrameMode};
 use crate::layout::{LegendSlot, Occupancy};
 use crate::panel::{build_panel, panel_labels, GeoExtent, Panel, PanelSpec, Placement};
@@ -35,6 +35,8 @@ pub struct MapLayers {
     pub disputed_areas: Vec<MapFeature>,
     /// Disputed or claimed boundaries, drawn dashed.
     pub disputed: Vec<MapLine>,
+    /// Places drawn as points (capitals), per `RenderOptions::capitals`.
+    pub places: Vec<MapPlace>,
 }
 
 impl MapLayers {
@@ -58,6 +60,17 @@ pub enum Target {
     /// Browsers: curved labels use `textPath`, so the text stays one
     /// selectable, searchable string.
     Web,
+}
+
+/// Which capitals to draw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Capitals {
+    #[default]
+    None,
+    /// Countries' capitals.
+    Countries,
+    /// Countries' and regions' (states, provinces…) capitals.
+    All,
 }
 
 /// How region borders are drawn.
@@ -121,6 +134,10 @@ pub struct RenderOptions {
     /// labels are placed separately per language and emitted in a
     /// `<switch>` on `systemLanguage`, with `name` as the fallback.
     pub languages: Vec<String>,
+    /// Name the neighbouring countries too (smaller, in grey), where they fit.
+    pub context_labels: bool,
+    /// Draw capitals (a dot and a name) from `MapLayers::places`.
+    pub capitals: Capitals,
     pub border_mode: BorderMode,
     pub target: Target,
     /// Place labels of small regions outside them, with a leader line.
@@ -168,6 +185,8 @@ impl Default for RenderOptions {
             css_vars: false,
             labels: false,
             languages: Vec::new(),
+            context_labels: false,
+            capitals: Capitals::None,
             border_mode: BorderMode::Layer,
             target: Target::Commons,
             label_leaders: true,
@@ -219,6 +238,7 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
     let context = sorted(&layers.context, |f| &f.id);
     let lakes = sorted(&layers.lakes, |f| &f.id);
     let disputed_areas = sorted(&layers.disputed_areas, |f| &f.id);
+    let places = layers.places.clone();
     let disputed = sorted(&layers.disputed, |l| &l.id);
 
     // Frame planning: the main cluster, plus far-away clusters for insets.
@@ -264,6 +284,7 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
         lakes: &lakes,
         disputed_areas: &disputed_areas,
         disputed: &disputed,
+        places: &places,
         anchor,
         frame_mode: opts.frame,
         projection: projection.clone(),
@@ -313,6 +334,7 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
             lakes: &lakes,
             disputed_areas: &disputed_areas,
             disputed: &disputed,
+            places: &places,
             anchor: Some(anchor),
             frame_mode: FrameMode::Auto,
             projection: proj,
@@ -332,7 +354,8 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
     }
 
     // Insets are drawn over the main map: place its labels clear of them.
-    if opts.labels && !boxes.is_empty() {
+    let any_labels = opts.labels || opts.context_labels || opts.capitals != Capitals::None;
+    if any_labels && !boxes.is_empty() {
         let reserved: Vec<[f64; 4]> = boxes
             .iter()
             .map(|b| {
@@ -345,14 +368,28 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
             })
             .collect();
         let main = &mut panels[0];
-        (main.labels, main.translations) = panel_labels(
+        // Capitals under an inset box are hidden by it: drop them.
+        main.places.retain(|(_, (x, y))| {
+            !reserved
+                .iter()
+                .any(|r| *x >= r[0] && *x <= r[2] && *y >= r[1] && *y <= r[3])
+        });
+        let l = panel_labels(
             &main.subject,
+            &main.context,
+            &main.places,
             &main.viewport,
             [0.0, 0.0, width, height],
             opts,
             opts.theme.label_size,
             &reserved,
         );
+        main.labels = l.regions;
+        main.translations = l.region_translations;
+        main.place_labels = l.places;
+        main.place_translations = l.place_translations;
+        main.context_labels = l.context;
+        main.context_translations = l.context_translations;
     }
 
     let shown: BTreeSet<&str> = panels

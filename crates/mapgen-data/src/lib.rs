@@ -15,6 +15,7 @@ pub mod gpkg_write;
 pub mod iso;
 pub mod join;
 mod layer;
+pub mod places;
 pub mod table;
 
 pub use error::{Error, Result};

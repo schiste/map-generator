@@ -70,6 +70,8 @@ const regions = await api.features("ne-admin1", "FRA"); // codes, names, parents
 Query parameters are the `RenderSpec` fields in kebab-case:
 - `width`, `height` (fixed; the frame widens to fill it), `theme`, `labels`,
   `languages=fr,zh-Hant`, `target=commons|web`, `css-vars`;
+- `capitals=countries|all` (national capitals, or also regional capitals inside the map)
+  and `context-labels` (name the neighbouring countries);
 - `title`, `show-title` (draw it above the map), `caption` (under the map), `alt` (for
   screen readers);
 - `frame`, `bbox`, `projection`, `insets`, `border-mode`, `credit`;

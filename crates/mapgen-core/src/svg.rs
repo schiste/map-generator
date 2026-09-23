@@ -4,8 +4,9 @@ use std::fmt::Write;
 use geo_types::{LineString, MultiPolygon};
 
 use crate::feature::MapFeature;
+use crate::feature::PlaceKind;
 use crate::labels::{letters, Label, LabelShape};
-use crate::panel::{BorderKind, Panel};
+use crate::panel::{BorderKind, Panel, CONTEXT_LABEL_SCALE, PLACE_LABEL_SCALE};
 use crate::pipeline::Target;
 
 /// Version of the SVG contract (`docs/contract.md`): the attributes, ids
@@ -174,6 +175,7 @@ pub fn write_svg(doc: &SvgDocument) -> String {
         "<style>\n{}</style>",
         stylesheet(doc.theme, doc.css_vars, doc.region_strokes)
             + &band_styles(doc, header > 0, !caption.is_empty())
+            + &context_styles(doc)
     );
     if doc.panels.iter().any(|p| !p.disputed_areas.is_empty()) {
         // Hatching for disputed areas; the line colour comes from `.mg-hatch`.
@@ -317,14 +319,32 @@ fn write_panel(
         vp,
         p,
     );
-    write_labels(
-        out,
-        ids,
-        &group("labels"),
-        panel,
-        doc.theme.label_size,
-        doc.target,
-    );
+    write_places(out, &group("places"), panel);
+    let size = doc.theme.label_size;
+    let sets = [
+        LabelSet {
+            labels: &panel.labels,
+            translations: &panel.translations,
+            codes: panel.subject.iter().map(|f| f.id.as_str()).collect(),
+            class: "mg-label",
+            nominal: size,
+        },
+        LabelSet {
+            labels: &panel.place_labels,
+            translations: &panel.place_translations,
+            codes: panel.places.iter().map(|(p, _)| p.id.as_str()).collect(),
+            class: "mg-place-label",
+            nominal: PLACE_LABEL_SCALE * size,
+        },
+        LabelSet {
+            labels: &panel.context_labels,
+            translations: &panel.context_translations,
+            codes: panel.context.iter().map(|f| f.id.as_str()).collect(),
+            class: "mg-context-label",
+            nominal: CONTEXT_LABEL_SCALE * size,
+        },
+    ];
+    write_labels(out, ids, &group("labels"), &sets, doc.target);
     if let Some(b) = panel.inset_box {
         let _ = writeln!(
             out,
@@ -518,26 +538,78 @@ fn write_borders(
     out.push_str("</g>\n");
 }
 
+/// Capitals: a dot each, with the place's name, code and Wikidata item.
+fn write_places(out: &mut String, group: &str, panel: &Panel) {
+    if panel.places.is_empty() {
+        return;
+    }
+    let _ = writeln!(out, "<g {group}>");
+    for (p, (x, y)) in &panel.places {
+        let class = match p.kind {
+            PlaceKind::CountryCapital => "mg-place mg-capital",
+            PlaceKind::RegionCapital => "mg-place mg-region-capital",
+        };
+        let extra: String = [
+            ("data-country", p.country.as_deref()),
+            ("data-wikidata", p.wikidata.as_deref()),
+        ]
+        .iter()
+        .filter_map(|(k, v)| v.map(|v| format!(" {k}=\"{}\"", escape(v))))
+        .collect();
+        let _ = writeln!(
+            out,
+            "<circle class=\"{class}\" cx=\"{}\" cy=\"{}\" r=\"{}\" data-name=\"{}\"{extra}><title>{}</title></circle>",
+            fmt_num(*x, 1),
+            fmt_num(*y, 1),
+            if p.kind == PlaceKind::CountryCapital { "3" } else { "2.2" },
+            escape(&p.name),
+            escape(&p.name)
+        );
+    }
+    out.push_str("</g>\n");
+}
+
+/// Labels of one kind (regions, places, neighbours), in every language.
+struct LabelSet<'a> {
+    labels: &'a [Label],
+    translations: &'a [(String, Vec<Label>)],
+    /// Codes of the labelled things, by `Label::feature` (for path ids).
+    codes: Vec<&'a str>,
+    class: &'static str,
+    nominal: f64,
+}
+
+impl LabelSet<'_> {
+    fn is_empty(&self) -> bool {
+        self.labels.is_empty() && self.translations.iter().all(|(_, t)| t.is_empty())
+    }
+}
+
 fn write_labels(
     out: &mut String,
     ids: &mut HashSet<String>,
     group: &str,
-    panel: &Panel,
-    nominal: f64,
+    sets: &[LabelSet],
     target: Target,
 ) {
-    let (labels, subject) = (&panel.labels, &panel.subject);
-    if labels.is_empty() && panel.translations.iter().all(|(_, t)| t.is_empty()) {
+    if sets.iter().all(LabelSet::is_empty) {
         return;
     }
     let _ = writeln!(out, "<g {group}>");
-    if panel.translations.is_empty() {
+    for set in sets {
+        write_label_set(out, ids, set, target);
+    }
+    out.push_str("</g>\n");
+}
+
+fn write_label_set(out: &mut String, ids: &mut HashSet<String>, set: &LabelSet, target: Target) {
+    let (labels, codes, class, nominal) = (set.labels, &set.codes, set.class, set.nominal);
+    if set.translations.is_empty() {
         for l in labels {
-            for e in label_elements(ids, l, subject, nominal, None, target) {
+            for e in label_elements(ids, l, codes, class, nominal, None, target) {
                 let _ = writeln!(out, "{e}");
             }
         }
-        out.push_str("</g>\n");
         return;
     }
     // One `<switch>` per region whose label differs in some language; a
@@ -546,14 +618,14 @@ fn write_labels(
     let find = |ls: &[Label], i: usize| ls.iter().find(|l| l.feature == i).cloned();
     let mut features: Vec<usize> = labels
         .iter()
-        .chain(panel.translations.iter().flat_map(|(_, t)| t))
+        .chain(set.translations.iter().flat_map(|(_, t)| t))
         .map(|l| l.feature)
         .collect();
     features.sort_unstable();
     features.dedup();
     // A switch renders its first match and `zh` matches `zh-Hant` readers,
     // so more specific tags go first.
-    let mut translations: Vec<&(String, Vec<Label>)> = panel.translations.iter().collect();
+    let mut translations: Vec<&(String, Vec<Label>)> = set.translations.iter().collect();
     translations.sort_by_key(|(lang, _)| std::cmp::Reverse(lang.split('-').count()));
     for i in features {
         let default = find(labels, i);
@@ -565,7 +637,7 @@ fn write_labels(
         if variants.is_empty() {
             for e in default
                 .iter()
-                .flat_map(|l| label_elements(ids, l, subject, nominal, None, target))
+                .flat_map(|l| label_elements(ids, l, codes, class, nominal, None, target))
             {
                 let _ = writeln!(out, "{e}");
             }
@@ -581,7 +653,7 @@ fn write_labels(
                 Some(l) => write_alternative(
                     out,
                     &attr,
-                    label_elements(ids, &l, subject, nominal, Some(lang), target),
+                    label_elements(ids, &l, codes, class, nominal, Some(lang), target),
                 ),
             }
         }
@@ -589,12 +661,11 @@ fn write_labels(
             write_alternative(
                 out,
                 "",
-                label_elements(ids, &l, subject, nominal, None, target),
+                label_elements(ids, &l, codes, class, nominal, None, target),
             );
         }
         out.push_str("</switch>\n");
     }
-    out.push_str("</g>\n");
 }
 
 /// The `systemLanguage` list for a language. librsvg treats each entry as a
@@ -633,7 +704,8 @@ fn write_alternative(out: &mut String, attr: &str, elements: Vec<String>) {
 fn label_elements(
     ids: &mut HashSet<String>,
     l: &Label,
-    subject: &[MapFeature],
+    codes: &[&str],
+    class: &str,
     nominal: f64,
     lang: Option<&str>,
     target: Target,
@@ -648,7 +720,7 @@ fn label_elements(
     let shift = BASELINE_SHIFT * l.size;
     let straight = || {
         format!(
-            "<text class=\"mg-label\" x=\"{}\" y=\"{}\"{style}>{text}</text>",
+            "<text class=\"{class}\" x=\"{}\" y=\"{}\"{style}>{text}</text>",
             fmt_num(l.x, 1),
             fmt_num(l.y + shift, 1)
         )
@@ -667,7 +739,7 @@ fn label_elements(
         ],
         LabelShape::Curved { path } if target == Target::Commons => {
             // One group, named for screen readers, of rotated letters.
-            let mut g = format!("<g class=\"mg-label\" aria-label=\"{text}\"{style}>");
+            let mut g = format!("<g class=\"{class}\" aria-label=\"{text}\"{style}>");
             for (c, x, y, angle) in letters(path, &l.text, l.size) {
                 if c.is_whitespace() {
                     continue;
@@ -686,7 +758,7 @@ fn label_elements(
             vec![g]
         }
         LabelShape::Curved { path } => {
-            let base = subject.get(l.feature).map_or("label", |f| f.id.as_str());
+            let base = codes.get(l.feature).copied().unwrap_or("label");
             let raw = match lang {
                 Some(lang) => format!("label-path-{base}-{lang}"),
                 None => format!("label-path-{base}"),
@@ -705,7 +777,7 @@ fn label_elements(
             vec![
                 format!("<path id=\"{id}\" fill=\"none\" d=\"{d}\"/>"),
                 format!(
-                    "<text class=\"mg-label\" dy=\"{}\"{style}><textPath href=\"#{id}\" startOffset=\"50%\">{text}</textPath></text>",
+                    "<text class=\"{class}\" dy=\"{}\"{style}><textPath href=\"#{id}\" startOffset=\"50%\">{text}</textPath></text>",
                     fmt_num(shift, 1)
                 ),
             ]
@@ -719,6 +791,53 @@ const BASELINE_SHIFT: f64 = 0.35;
 
 /// Styles of the title and caption, only when drawn (other maps' CSS is
 /// unchanged).
+/// Styles of capitals and neighbour names, when the map has them.
+fn context_styles(doc: &SvgDocument) -> String {
+    let places = doc.panels.iter().any(|p| !p.places.is_empty());
+    let context = doc.panels.iter().any(|p| {
+        !p.context_labels.is_empty() || p.context_translations.iter().any(|(_, t)| !t.is_empty())
+    });
+    if !places && !context {
+        return String::new();
+    }
+    let c = |slot: &str| {
+        let value = doc
+            .theme
+            .colors()
+            .iter()
+            .find(|(s, _)| *s == slot)
+            .map(|(_, c)| c.as_str().to_owned())
+            .unwrap_or_default();
+        if doc.css_vars {
+            format!("var(--mg-{slot},{value})")
+        } else {
+            value
+        }
+    };
+    let (label, land, ctx) = (c("label"), c("land"), c("context-land"));
+    let size = |scale: f64| fmt_num(scale * doc.theme.label_size, 2);
+    let mut css = String::new();
+    if places {
+        css.push_str(&format!(
+            ".mg-place{{stroke-width:1}}\n\
+             .mg-capital{{fill:{label};stroke:{land}}}\n\
+             .mg-region-capital{{fill:{land};stroke:{label}}}\n\
+             .mg-place-label{{fill:{label};font:{}px sans-serif;text-anchor:middle;\
+             paint-order:stroke;stroke:{land};stroke-width:2px;stroke-linejoin:round}}\n",
+            size(PLACE_LABEL_SCALE)
+        ));
+    }
+    if context {
+        css.push_str(&format!(
+            ".mg-context-label{{fill:{label};opacity:.7;font:italic {}px sans-serif;\
+             text-anchor:middle;paint-order:stroke;stroke:{ctx};\
+             stroke-width:2px;stroke-linejoin:round}}\n",
+            size(CONTEXT_LABEL_SCALE)
+        ));
+    }
+    css
+}
+
 fn band_styles(doc: &SvgDocument, title: bool, caption: bool) -> String {
     let value = doc
         .theme

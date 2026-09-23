@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use mapgen_core::frame::BBOX_PRESETS;
 use mapgen_core::units::{check_units, dissolve, tag_units, UnitRow};
 use mapgen_core::{
-    render, BorderMode, Color, FrameMode, GeoBBox, InsetMode, MapFeature, MapLayers, MapLine,
-    ProjectionChoice, RenderOptions, Target, Theme,
+    render, BorderMode, Capitals, Color, FrameMode, GeoBBox, InsetMode, MapFeature, MapLayers,
+    MapLine, MapPlace, ProjectionChoice, RenderOptions, Target, Theme,
 };
 use mapgen_data::{LayerQuery, Source};
 use serde::{Deserialize, Serialize};
@@ -391,6 +391,16 @@ pub enum Borders {
     Regions,
 }
 
+/// Which capitals to draw (from `setPlaces`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CapitalsSpec {
+    #[default]
+    None,
+    Countries,
+    All,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TargetSpec {
@@ -456,6 +466,12 @@ pub struct RenderSpec {
     pub label_size: Option<f64>,
     #[serde(default)]
     pub labels: bool,
+    /// Also name the neighbouring (context) countries, where room is left.
+    #[serde(default)]
+    pub context_labels: bool,
+    /// `countries` (national capitals) or `all` (also regional capitals).
+    #[serde(default)]
+    pub capitals: CapitalsSpec,
     /// Also label in these languages (read with `LayerSpec.languages`), in a
     /// `<switch>` on `systemLanguage`.
     #[serde(default)]
@@ -558,6 +574,12 @@ impl RenderSpec {
             theme,
             css_vars: self.css_vars || self.format == Format::Html,
             labels: self.labels,
+            context_labels: self.context_labels,
+            capitals: match self.capitals {
+                CapitalsSpec::None => Capitals::None,
+                CapitalsSpec::Countries => Capitals::Countries,
+                CapitalsSpec::All => Capitals::All,
+            },
             languages: self.languages.clone(),
             border_mode: match self.border_mode {
                 Borders::Layer => BorderMode::Layer,
@@ -739,6 +761,8 @@ pub struct Sources<'a> {
     pub lakes: Option<&'a LoadedLayer>,
     pub disputed_areas: Option<&'a LoadedLayer>,
     pub disputed: Option<&'a LoadedLines>,
+    /// Capitals, for `capitals`.
+    pub places: Option<&'a [MapPlace]>,
     pub units: Option<&'a [UnitRow]>,
 }
 
@@ -811,6 +835,11 @@ pub fn render_map(src: Sources, spec: &RenderSpec) -> Result<MapOutput> {
         lakes: src.lakes.map(LoadedLayer::all).unwrap_or_default(),
         disputed_areas: src.disputed_areas.map(LoadedLayer::all).unwrap_or_default(),
         disputed: src.disputed.map(|d| d.lines.clone()).unwrap_or_default(),
+        places: if spec.capitals == CapitalsSpec::None {
+            Vec::new()
+        } else {
+            src.places.map(<[MapPlace]>::to_vec).unwrap_or_default()
+        },
     };
     layers.exclude_subject_from_context(region);
     for r in spec.regions.iter().flatten() {
@@ -1096,6 +1125,7 @@ mod tests {
                 lakes: None,
                 disputed_areas: None,
                 disputed: None,
+                places: None,
                 units: None,
             },
             s,
@@ -1154,6 +1184,69 @@ mod tests {
     }
 
     #[test]
+    fn capitals_and_neighbour_names() {
+        let layer = twin();
+        let north = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"id":"XB","name":"Northland"},"geometry":{"type":"Polygon","coordinates":[[[7,46.25],[12,46.25],[12,49],[7,49],[7,46.25]]]}}]}"#;
+        let context = LoadedLayer::parse(north, &LayerSpec::default()).unwrap();
+        let place = |id: &str, kind, lon, lat| MapPlace {
+            id: id.into(),
+            name: format!("{id} town"),
+            names: BTreeMap::new(),
+            kind,
+            country: None,
+            wikidata: Some("Q1".into()),
+            lon,
+            lat,
+        };
+        let places = [
+            place("1", mapgen_core::PlaceKind::CountryCapital, 9.5, 45.5),
+            place("2", mapgen_core::PlaceKind::RegionCapital, 10.5, 45.5),
+            // A regional capital outside the mapped regions: never drawn.
+            place("3", mapgen_core::PlaceKind::RegionCapital, 11.4, 45.5),
+        ];
+        let src = Sources {
+            subject: &layer,
+            context: Some(&context),
+            lakes: None,
+            disputed_areas: None,
+            disputed: None,
+            places: Some(&places),
+            units: None,
+        };
+        let circles = |svg: &str| svg.matches("<circle class=\"mg-place").count();
+        let plain = render_map(src, &spec("{}").unwrap()).unwrap().svg;
+        assert_eq!(circles(&plain), 0, "capitals are opt-in");
+        assert!(!plain.contains("mg-place") && !plain.contains("mg-context-label"));
+
+        let national = render_map(src, &spec(r#"{"capitals": "countries"}"#).unwrap())
+            .unwrap()
+            .svg;
+        assert_eq!(circles(&national), 1);
+        assert!(national.contains("<g id=\"places\">"));
+        assert!(national.contains("class=\"mg-place mg-capital\""));
+        assert!(national.contains("data-wikidata=\"Q1\""));
+        assert!(national.contains(">1 town</text>"));
+
+        let all = render_map(
+            src,
+            &spec(r#"{"capitals": "all", "contextLabels": true, "bbox": "7,44.5,12,47.5"}"#)
+                .unwrap(),
+        )
+        .unwrap()
+        .svg;
+        assert_eq!(circles(&all), 2);
+        assert!(all.contains("mg-region-capital"));
+        assert!(!all.contains("3 town"));
+        assert!(all.contains("class=\"mg-context-label\""), "{all}");
+        assert!(all.contains(">Northland</text>"));
+        // Layer order: places after borders, before labels.
+        let at = |needle: &str| all.find(needle).unwrap();
+        assert!(at("id=\"borders\"") < at("id=\"places\""));
+        assert!(at("id=\"places\"") < at("id=\"labels\""));
+        assert!(spec(r#"{"capitals": "some"}"#).is_err());
+    }
+
+    #[test]
     fn region_filtering() {
         let layer = LoadedLayer::parse(
             TWIN,
@@ -1170,6 +1263,7 @@ mod tests {
             lakes: None,
             disputed_areas: None,
             disputed: None,
+            places: None,
             units: None,
         };
         let out = render_map(src, &spec(r#"{"region": "Westland"}"#).unwrap()).unwrap();
@@ -1225,6 +1319,7 @@ mod tests {
             lakes: Some(&context),
             disputed_areas: None,
             disputed: None,
+            places: None,
             units: None,
         };
         let out = render_map(src, &RenderSpec::default()).unwrap();
@@ -1335,6 +1430,7 @@ mod tests {
             lakes: None,
             disputed_areas: None,
             disputed: None,
+            places: None,
             units: Some(&rows),
         };
         let tagged = render_map(src, &RenderSpec::default()).unwrap();

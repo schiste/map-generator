@@ -40,6 +40,34 @@ case "${1:-}" in
     fetch "$base/ne_10m_lakes.geojson" "$DATA_DIR/ne_10m_lakes.geojson"
     fetch "$base/ne_10m_admin_0_boundary_lines_disputed_areas.geojson" "$DATA_DIR/ne_10m_disputed_lines.geojson"
     fetch "$base/ne_10m_admin_0_disputed_areas.geojson" "$DATA_DIR/ne_10m_disputed_areas.geojson"
+    # Capitals only (--capitals), with their names, country and Wikidata item.
+    if [[ ! -f "$DATA_DIR/ne_10m_capitals.geojson" ]]; then
+      fetch "$base/ne_10m_populated_places.geojson" "$DATA_DIR/ne_10m_populated_places.geojson"
+      "$PY" - "$DATA_DIR/ne_10m_populated_places.geojson" "$DATA_DIR/ne_10m_capitals.geojson" <<'PY'
+import json, sys
+
+src, dest = sys.argv[1:3]
+CAPITALS = {"Admin-0 capital", "Admin-0 capital alt", "Admin-1 capital",
+            "Admin-1 region capital", "Admin-0 region capital"}
+KEEP = ("FEATURECLA", "NAME", "ADM0_A3", "ADM1NAME", "WIKIDATAID", "NE_ID")
+features = []
+for f in json.load(open(src, encoding="utf-8"))["features"]:
+    p = f["properties"]
+    if p.get("FEATURECLA") not in CAPITALS:
+        continue
+    props = {k: p[k] for k in KEEP if p.get(k) not in (None, "")}
+    props.update({k: v for k, v in p.items() if k.startswith("NAME_") and v})
+    lon, lat = f["geometry"]["coordinates"][:2]
+    features.append({"type": "Feature", "properties": props,
+                     "geometry": {"type": "Point", "coordinates": [round(lon, 5), round(lat, 5)]}})
+features.sort(key=lambda f: f["properties"]["NE_ID"])
+with open(dest, "w", encoding="utf-8") as out:
+    json.dump({"type": "FeatureCollection", "features": features}, out,
+              ensure_ascii=False, separators=(",", ":"))
+print(f"{dest}: {len(features)} capitals")
+PY
+      rm -f "$DATA_DIR/ne_10m_populated_places.geojson"
+    fi
     ls -1 "$DATA_DIR"/*.geojson
     ;;
   natural-earth)

@@ -28,12 +28,12 @@ pub mod units;
 pub mod validate;
 
 pub use error::{Error, Result};
-pub use feature::{MapFeature, MapLine};
+pub use feature::{MapFeature, MapLine, MapPlace, PlaceKind};
 pub use frame::{FrameMode, GeoBBox};
 pub use html::html_page;
 pub use layout::LegendSlot;
 pub use pipeline::{
-    render, BorderMode, InsetInfo, InsetMode, MapLayers, RenderOptions, Rendered, Target,
+    render, BorderMode, Capitals, InsetInfo, InsetMode, MapLayers, RenderOptions, Rendered, Target,
 };
 pub use projection::{MapProjection, Projection, ProjectionChoice};
 pub use svg::CONTRACT_VERSION;

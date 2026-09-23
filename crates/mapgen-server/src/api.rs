@@ -599,6 +599,7 @@ fn render_selection(
         lakes: s.registry.lakes.as_ref(),
         disputed_areas: s.registry.disputed_areas.as_ref(),
         disputed: s.registry.disputed.as_ref(),
+        places: s.registry.places.as_deref(),
         units: None,
     };
     let credit = spec.attribution.clone().or_else(|| src.credits());

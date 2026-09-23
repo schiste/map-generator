@@ -53,7 +53,7 @@ colour the map by country, neighbours included.
 | ![World, dark theme](docs/examples/world-dark.svg) | ![South America, curved label on Chile](docs/examples/south-america.svg) |
 | ![France, régions (IGN via geoBoundaries)](docs/examples/france-regions.svg) | ![US counties (Census Bureau, public domain), Albers, insets](docs/examples/usa-counties.svg) |
 | ![Kashmir, India's view](docs/examples/kashmir-ind.svg) | ![Kashmir, Pakistan's view](docs/examples/kashmir-pak.svg) |
-| ![Fiji, straddling 180°](docs/examples/fiji.svg) | |
+| ![Fiji, straddling 180°](docs/examples/fiji.svg) | ![Italy, national and regional capitals, neighbours named](docs/examples/italy-capitals.svg) |
 
 Open [`docs/examples/france-departements.html`](docs/examples/france-departements.html)
 locally for the interactive colour editor. Regenerate everything with `scripts/build-examples.sh`.
@@ -113,6 +113,10 @@ mapgen render -i usa-counties.gpkg --dataset geoboundaries --credit -o usa.svg  
 # name_{lang} for other sources). Commons: [[File:Map.svg|lang=fr]]
 mapgen render -i data/ne_10m_admin_1.geojson --dataset ne-admin1 --region FRA --labels \
     --languages fr,ar,zh-Hans,zh-Hant -o france.svg
+
+# Capitals (national, or also regional ones inside the map) and neighbours' names
+mapgen render … --context data/ne_10m_admin_0.geojson --places data/ne_10m_capitals.geojson \
+    --capitals all --context-labels
 
 # Projections
 mapgen render … --projection albers --parallels 29.5,45.5

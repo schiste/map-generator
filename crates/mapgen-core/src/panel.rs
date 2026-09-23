@@ -15,10 +15,10 @@ use crate::antimeridian::{
     canonicalize_antimeridian, covering_arc, split_at_seam, split_lines_at_seam, wrap_longitude,
 };
 use crate::error::{Error, Result};
-use crate::feature::{MapFeature, MapLine};
+use crate::feature::{MapFeature, MapLine, MapPlace, PlaceKind};
 use crate::frame::{clip_to_rect, FrameMode};
-use crate::labels::{place_labels_around, Label, LabelOptions};
-use crate::pipeline::{BorderMode, RenderOptions};
+use crate::labels::{label_box, place_labels_around, place_point_labels, Label, LabelOptions};
+use crate::pipeline::{BorderMode, Capitals, RenderOptions};
 use crate::projection::{MapProjection, Projection};
 use crate::simplify::{vw_epsilon, BorderArc, Topology};
 use crate::svg::Viewport;
@@ -72,6 +72,14 @@ pub struct Panel {
     pub labels: Vec<Label>,
     /// Labels per extra language, placed independently of each other.
     pub translations: Vec<(String, Vec<Label>)>,
+    /// Places drawn (capitals) and where, in pixels.
+    pub places: Vec<(MapPlace, (f64, f64))>,
+    /// Names of the places, and per extra language.
+    pub place_labels: Vec<Label>,
+    pub place_translations: Vec<(String, Vec<Label>)>,
+    /// Names of neighbouring countries (`context_labels`), and per language.
+    pub context_labels: Vec<Label>,
+    pub context_translations: Vec<(String, Vec<Label>)>,
     /// For insets: the box, in pixels.
     pub inset_box: Option<Rect<f64>>,
     pub projection: MapProjection,
@@ -101,6 +109,7 @@ pub(crate) struct PanelSpec<'a> {
     pub lakes: &'a [MapFeature],
     pub disputed_areas: &'a [MapFeature],
     pub disputed: &'a [MapLine],
+    pub places: &'a [MapPlace],
     /// Lon/lat geometry whose extent is the frame; `None` for the whole globe.
     pub anchor: Option<MultiPolygon<f64>>,
     pub frame_mode: FrameMode,
@@ -166,6 +175,7 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
         lakes,
         disputed_areas,
         disputed,
+        places,
         anchor,
         frame_mode,
         projection,
@@ -389,15 +399,57 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
     lakes.retain(|f| !f.geometry.0.is_empty());
     disputed_areas.retain(|f| !f.geometry.0.is_empty());
 
-    // 7. Labels, in pixels.
-    let (labels, translations) = if opts.labels {
-        let bounds = match placement {
-            Placement::Canvas { width, .. } => [0.0, 0.0, f64::from(width), viewport.canvas_height],
-            Placement::Box(b) => [b.min().x, b.min().y, b.max().x, b.max().y],
-        };
-        panel_labels(&subject, &viewport, bounds, opts, label_size, &[])
+    // 7. Places (capitals) in the panel, then labels, in pixels.
+    let bounds = match placement {
+        Placement::Canvas { width, .. } => [0.0, 0.0, f64::from(width), viewport.canvas_height],
+        Placement::Box(b) => [b.min().x, b.min().y, b.max().x, b.max().y],
+    };
+    let shown = |k: PlaceKind| match opts.capitals {
+        Capitals::None => false,
+        Capitals::Countries => k == PlaceKind::CountryCapital,
+        Capitals::All => true,
+    };
+    let places: Vec<(MapPlace, (f64, f64))> = places
+        .iter()
+        .filter(|p| shown(p.kind))
+        .filter_map(|p| {
+            let (x, y) = projection.project(p.lon, p.lat);
+            let (px, py) = viewport.to_px(x, y);
+            let inside = px.is_finite()
+                && py.is_finite()
+                && px >= bounds[0] + 2.0
+                && px <= bounds[2] - 2.0
+                && py >= bounds[1] + 2.0
+                && py <= bounds[3] - 2.0;
+            if !inside {
+                return None;
+            }
+            // Regional capitals only within the mapped regions.
+            let within = subject
+                .iter()
+                .any(|f| f.geometry.contains(&Point::new(x, y)));
+            (within || p.kind == PlaceKind::CountryCapital).then(|| (p.clone(), (px, py), within))
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        // Priority: capitals within the map, national first, then neighbours'.
+        .map(|(p, xy, within)| ((!within, p.kind, p.id.clone()), (p, xy)))
+        .collect::<std::collections::BTreeMap<_, _>>()
+        .into_values()
+        .collect();
+    let labels = if opts.labels || !places.is_empty() || opts.context_labels {
+        panel_labels(
+            &subject,
+            &context,
+            &places,
+            &viewport,
+            bounds,
+            opts,
+            label_size,
+            &[],
+        )
     } else {
-        (Vec::new(), Vec::new())
+        PanelLabels::default()
     };
 
     Ok(Panel {
@@ -408,8 +460,13 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
         lakes,
         disputed_areas,
         borders,
-        labels,
-        translations,
+        labels: labels.regions,
+        translations: labels.region_translations,
+        places,
+        place_labels: labels.places,
+        place_translations: labels.place_translations,
+        context_labels: labels.context,
+        context_translations: labels.context_translations,
         inset_box: match placement {
             Placement::Box(b) => Some(b),
             Placement::Canvas { .. } => None,
@@ -687,50 +744,141 @@ fn fit(frame: Rect<f64>, placement: Placement) -> Result<Viewport> {
     }
 }
 
-/// Labels of a panel's regions, in the default name and in each of
-/// `opts.languages`, placed within `bounds` and clear of `reserved` boxes.
+/// Every label of a panel, by kind.
+#[derive(Debug, Default)]
+pub(crate) struct PanelLabels {
+    pub regions: Vec<Label>,
+    pub region_translations: Vec<(String, Vec<Label>)>,
+    pub places: Vec<Label>,
+    pub place_translations: Vec<(String, Vec<Label>)>,
+    pub context: Vec<Label>,
+    pub context_translations: Vec<(String, Vec<Label>)>,
+}
+
+/// Labels of a panel, in the default name and in each of `opts.languages`,
+/// within `bounds` and clear of `reserved` boxes, by priority: the regions
+/// (clear of the capitals' dots), the capitals' names, then the names of
+/// neighbouring countries where room is left.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn panel_labels(
     subject: &[MapFeature],
+    context: &[MapFeature],
+    places: &[(MapPlace, (f64, f64))],
     viewport: &Viewport,
     bounds: [f64; 4],
     opts: &RenderOptions,
     label_size: f64,
     reserved: &[[f64; 4]],
-) -> (Vec<Label>, Vec<(String, Vec<Label>)>) {
-    let px: Vec<MultiPolygon<f64>> = subject
-        .iter()
-        .map(|f| {
-            f.geometry.map_coords(|c| {
-                let (x, y) = viewport.to_px(c.x, c.y);
-                coord! { x: x, y: y }
-            })
-        })
-        .collect();
-    let regions_in = |lang: Option<&str>| -> Vec<(&str, &MultiPolygon<f64>)> {
-        subject
+) -> PanelLabels {
+    let to_px = |features: &[MapFeature]| -> Vec<MultiPolygon<f64>> {
+        features
             .iter()
-            .zip(&px)
-            .map(|(f, g)| {
-                let name = lang.and_then(|l| f.names.get(l)).unwrap_or(&f.name);
-                (name.as_str(), g)
+            .map(|f| {
+                f.geometry.map_coords(|c| {
+                    let (x, y) = viewport.to_px(c.x, c.y);
+                    coord! { x: x, y: y }
+                })
             })
             .collect()
     };
-    let label_opts = LabelOptions {
+    let name_in =
+        |names: &std::collections::BTreeMap<String, String>, name: &str, lang: Option<&str>| {
+            lang.and_then(|l| names.get(l).cloned())
+                .unwrap_or_else(|| name.to_owned())
+        };
+    // Dots are obstacles for every label.
+    let mut base: Vec<[f64; 4]> = reserved.to_vec();
+    base.extend(
+        places
+            .iter()
+            .map(|(_, (x, y))| [x - 3.0, y - 3.0, x + 3.0, y + 3.0]),
+    );
+    let langs: Vec<Option<&str>> = std::iter::once(None)
+        .chain(opts.languages.iter().map(|l| Some(l.as_str())))
+        .collect();
+
+    let subject_px = to_px(subject);
+    let context_px = if opts.context_labels {
+        to_px(context)
+    } else {
+        Vec::new()
+    };
+    let region_opts = LabelOptions {
         size: label_size,
         min_scale: opts.label_min_scale,
         leaders: opts.label_leaders,
         curved: opts.label_curved,
     };
-    let place =
-        |lang: Option<&str>| place_labels_around(&regions_in(lang), bounds, &label_opts, reserved);
-    let translations = opts
-        .languages
-        .iter()
-        .map(|l| (l.clone(), place(Some(l))))
-        .collect();
-    (place(None), translations)
+    let context_opts = LabelOptions {
+        size: CONTEXT_LABEL_SCALE * label_size,
+        min_scale: 0.8,
+        leaders: false,
+        curved: opts.label_curved,
+    };
+    let mut out = PanelLabels::default();
+    for lang in langs {
+        let mut taken = base.clone();
+        let regions = if opts.labels {
+            let names: Vec<String> = subject
+                .iter()
+                .map(|f| name_in(&f.names, &f.name, lang))
+                .collect();
+            let items: Vec<(&str, &MultiPolygon<f64>)> =
+                names.iter().map(String::as_str).zip(&subject_px).collect();
+            place_labels_around(&items, bounds, &region_opts, &taken)
+        } else {
+            Vec::new()
+        };
+        taken.extend(regions.iter().map(label_box));
+        let names: Vec<String> = places
+            .iter()
+            .map(|(p, _)| name_in(&p.names, &p.name, lang))
+            .collect();
+        let points: Vec<(&str, (f64, f64))> = names
+            .iter()
+            .map(String::as_str)
+            .zip(places.iter().map(|(_, xy)| *xy))
+            .collect();
+        let order: Vec<usize> = (0..points.len()).collect();
+        let place_labels = place_point_labels(
+            &points,
+            &order,
+            PLACE_LABEL_SCALE * label_size,
+            bounds,
+            &taken,
+        );
+        taken.extend(place_labels.iter().map(label_box));
+        let context_labels = if opts.context_labels {
+            let names: Vec<String> = context
+                .iter()
+                .map(|f| name_in(&f.names, &f.name, lang))
+                .collect();
+            let items: Vec<(&str, &MultiPolygon<f64>)> =
+                names.iter().map(String::as_str).zip(&context_px).collect();
+            place_labels_around(&items, bounds, &context_opts, &taken)
+        } else {
+            Vec::new()
+        };
+        match lang {
+            None => {
+                out.regions = regions;
+                out.places = place_labels;
+                out.context = context_labels;
+            }
+            Some(l) => {
+                out.region_translations.push((l.to_owned(), regions));
+                out.place_translations.push((l.to_owned(), place_labels));
+                out.context_translations
+                    .push((l.to_owned(), context_labels));
+            }
+        }
+    }
+    out
 }
+
+/// Sizes of place and neighbour labels, relative to region labels.
+pub(crate) const PLACE_LABEL_SCALE: f64 = 0.85;
+pub(crate) const CONTEXT_LABEL_SCALE: f64 = 0.9;
 
 #[cfg(test)]
 mod tests {

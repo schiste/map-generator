@@ -7,8 +7,8 @@ use mapgen_core::frame::BBOX_PRESETS;
 use mapgen_core::units::{check_units, dissolve, tag_units, UnitRow};
 use mapgen_core::validate::{self, CheckOptions, IssueKind};
 use mapgen_core::{
-    html_page, render, BorderMode, Color, FrameMode, GeoBBox, InsetMode, MapFeature, MapLayers,
-    MapLine, ProjectionChoice, RenderOptions, Target, Theme,
+    html_page, render, BorderMode, Capitals, Color, FrameMode, GeoBBox, InsetMode, MapFeature,
+    MapLayers, MapLine, MapPlace, ProjectionChoice, RenderOptions, Target, Theme,
 };
 use mapgen_data::crosswalk::{
     apply_code_table, apply_parent_names, crosswalk, load_reference, ReferenceSpec,
@@ -142,6 +142,11 @@ pub(crate) struct InputArgs {
     /// `ne_10m_admin_0_disputed_areas` (.gpkg or .geojson).
     #[arg(long)]
     disputed_areas: Option<PathBuf>,
+
+    /// Capitals, for --capitals: Natural Earth populated places
+    /// (`ne_10m_capitals.geojson` or `ne_10m_populated_places.geojson`).
+    #[arg(long)]
+    places: Option<PathBuf>,
 
     /// Natural Earth point of view for disputed borders (e.g. IND, PAK, CHN,
     /// UKR, RUS, ISO): uses `<file>_<code>` variants of the Natural Earth
@@ -409,6 +414,11 @@ impl InputArgs {
             lakes: load(&self.lakes, Source::NaturalEarthLakes)?,
             disputed_areas: load(&self.disputed_areas, Source::NaturalEarthDisputedAreas)?,
             disputed,
+            places: match &self.places {
+                Some(p) => mapgen_data::places::read_places(p, &self.languages)
+                    .with_context(|| format!("reading {}", p.display()))?,
+                None => Vec::new(),
+            },
         })
     }
 }
@@ -419,6 +429,7 @@ struct Surroundings {
     lakes: Vec<MapFeature>,
     disputed_areas: Vec<MapFeature>,
     disputed: Vec<MapLine>,
+    places: Vec<MapPlace>,
 }
 
 /// Warns when neighbouring countries overlap: competing claims (e.g. from
@@ -526,6 +537,12 @@ struct StyleArgs {
     /// Draw region names.
     #[arg(long)]
     labels: bool,
+    /// Also name neighbouring countries (--context), where room is left.
+    #[arg(long)]
+    context_labels: bool,
+    /// Draw capitals (--places): `countries` or `all` (also regional capitals).
+    #[arg(long, value_enum, default_value = "none")]
+    capitals: CapitalsArg,
     /// `layer`: every border drawn once, in its own layer, styled by kind.
     /// `regions`: each region strokes its own outline (self-contained regions,
     /// e.g. for hover highlighting; smaller files).
@@ -596,6 +613,13 @@ enum FrameArg {
 enum BorderModeArg {
     Layer,
     Regions,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum CapitalsArg {
+    None,
+    Countries,
+    All,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -841,8 +865,8 @@ fn options(
     html: bool,
 ) -> Result<RenderOptions> {
     if !input.languages.is_empty() {
-        if !style.labels {
-            bail!("--languages labels the map in several languages: add --labels");
+        if !style.labels && !style.context_labels && style.capitals == CapitalsArg::None {
+            bail!("--languages labels the map in several languages: add --labels, --context-labels or --capitals");
         }
         if input.query().name_language_column.is_none() {
             bail!(
@@ -878,6 +902,12 @@ fn options(
         theme: style.theme(),
         css_vars: style.css_vars || html,
         labels: style.labels,
+        context_labels: style.context_labels,
+        capitals: match style.capitals {
+            CapitalsArg::None => Capitals::None,
+            CapitalsArg::Countries => Capitals::Countries,
+            CapitalsArg::All => Capitals::All,
+        },
         languages: input.languages.clone(),
         border_mode: match style.border_mode {
             BorderModeArg::Layer => BorderMode::Layer,
@@ -972,6 +1002,7 @@ fn run_render(args: RenderArgs) -> Result<()> {
         lakes: context.lakes,
         disputed_areas: context.disputed_areas,
         disputed: context.disputed,
+        places: context.places,
     };
     layers.exclude_subject_from_context(region.as_deref());
     warn_overlapping_claims(&layers.context);
@@ -1383,6 +1414,7 @@ impl Batch<'_> {
             lakes: self.context.lakes.clone(),
             disputed_areas: self.context.disputed_areas.clone(),
             disputed: self.context.disputed.clone(),
+            places: self.context.places.clone(),
             subject,
         };
         layers.exclude_subject_from_context(code);

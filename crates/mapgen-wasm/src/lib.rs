@@ -97,6 +97,10 @@ export interface RenderSpec {
   disputedBorderWidth?: number;
   labelSize?: number;
   labels?: boolean;
+  /** Also name neighbouring countries, where room is left. */
+  contextLabels?: boolean;
+  /** Draw capitals (from `setPlaces`): national, or also regional ones. */
+  capitals?: "none" | "countries" | "all";
   /** Also label in these languages (read with LayerSpec.languages): a <switch> on systemLanguage per label. */
   languages?: string[];
   /** "layer" (default): borders drawn once, by kind; "regions": each region strokes its outline. */
@@ -147,6 +151,11 @@ export interface MapGenerator {
   setDisputed(geojson?: string, spec?: LayerSpec): number;
   /** Loads disputed areas, drawn hatched (default: Natural Earth); omit to remove. */
   setDisputedAreas(geojson?: string, spec?: LayerSpec): number;
+  /**
+   * Loads capitals from Natural Earth populated places (`ne_10m_capitals.geojson`),
+   * with names in `languages`; omit `geojson` to remove them. Returns the count.
+   */
+  setPlaces(geojson?: string, languages?: string[]): number;
   /**
    * Loads a data-unit table (CSV, TSV or pipe-separated: which map regions make
    * up each data unit). Regions get `data-unit`, or merge with `dissolve`.
@@ -353,6 +362,7 @@ pub struct MapGenerator {
     lakes: Option<LoadedLayer>,
     disputed_areas: Option<LoadedLayer>,
     disputed: Option<LoadedLines>,
+    places: Option<Vec<mapgen_core::MapPlace>>,
     units: Option<Vec<mapgen_core::units::UnitRow>>,
 }
 
@@ -449,6 +459,24 @@ impl MapGenerator {
         Ok(self.disputed.as_ref().map_or(0, LoadedLines::len))
     }
 
+    /// Loads capitals (Natural Earth populated places). Pass `undefined` to
+    /// remove them.
+    #[wasm_bindgen(js_name = setPlaces, skip_typescript)]
+    pub fn set_places(
+        &mut self,
+        geojson: Option<String>,
+        languages: Option<Vec<String>>,
+    ) -> Result<usize, JsError> {
+        self.places = match geojson {
+            None => None,
+            Some(text) => Some(
+                mapgen_data::places::places_from_str(&text, &languages.unwrap_or_default())
+                    .map_err(|e| JsError::new(&e.to_string()))?,
+            ),
+        };
+        Ok(self.places.as_ref().map_or(0, Vec::len))
+    }
+
     /// Distinct region codes in the subject layer, sorted.
     pub fn regions(&self) -> Result<Vec<String>, JsError> {
         Ok(self.subject()?.regions())
@@ -464,6 +492,7 @@ impl MapGenerator {
             lakes: self.lakes.as_ref(),
             disputed_areas: self.disputed_areas.as_ref(),
             disputed: self.disputed.as_ref(),
+            places: self.places.as_deref(),
             units: self.units.as_deref(),
         };
         Ok(to_js(&render_map(src, &spec).map_err(js_err)?)?.unchecked_into())

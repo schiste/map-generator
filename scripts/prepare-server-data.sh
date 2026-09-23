@@ -64,7 +64,7 @@ convert "$DATA_DIR/ne_10m_admin_0.geojson" "$out/ne_10m_admin_0.gpkg" --dataset 
 convert "$DATA_DIR/ne_10m_admin_1.geojson" "$out/ne_10m_admin_1.gpkg" --dataset ne-admin1
 convert "$DATA_DIR/ne_10m_lakes.geojson" "$out/ne_10m_lakes.gpkg" --table ne_10m_lakes
 convert "$DATA_DIR/ne_10m_disputed_areas.geojson" "$out/ne_10m_disputed_areas.gpkg" --table ne_10m_admin_0_disputed_areas
-cp "$DATA_DIR/ne_10m_disputed_lines.geojson" "$out/"
+cp "$DATA_DIR/ne_10m_disputed_lines.geojson" "$DATA_DIR/ne_10m_capitals.geojson" "$out/"
 for v in "${view_list[@]}"; do
   lv=$(echo "$v" | tr '[:upper:]' '[:lower:]')
   convert "$DATA_DIR/ne_10m_admin_0_$lv.geojson" "$out/ne_10m_admin_0_$lv.gpkg" --dataset ne-admin0
@@ -92,6 +92,7 @@ countries = "ne_10m_admin_0.gpkg"
 lakes = "ne_10m_lakes.gpkg"
 disputed = "ne_10m_disputed_lines.geojson"
 disputed_areas = "ne_10m_disputed_areas.gpkg"
+places = "ne_10m_capitals.geojson"
 
 [[dataset]]
 id = "ne-admin0"
