@@ -646,6 +646,19 @@ fn parse_parallels(s: &str) -> std::result::Result<(f64, f64), String> {
 
 #[derive(clap::Args)]
 struct LayoutArgs {
+    /// A fixed map height in pixels: the frame widens to fill it (default:
+    /// from the map's shape).
+    #[arg(long)]
+    height: Option<u32>,
+    /// Draw the title above the map (it is always in the file's <title>).
+    #[arg(long)]
+    show_title: bool,
+    /// Text drawn under the map, e.g. a source or a note.
+    #[arg(long)]
+    caption: Option<String>,
+    /// A description of the map for screen readers.
+    #[arg(long)]
+    alt: Option<String>,
     /// Output width in pixels.
     #[arg(long, default_value_t = 1000)]
     width: u32,
@@ -848,6 +861,10 @@ fn options(
         padding: layout.padding,
         precision: layout.precision,
         title,
+        height: layout.height,
+        show_title: layout.show_title,
+        caption: layout.caption.clone(),
+        alt: layout.alt.clone(),
         attribution: input.attribution(data).0,
         credit: input.credit,
         boundary_year: input

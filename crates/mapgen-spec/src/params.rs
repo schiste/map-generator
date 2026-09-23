@@ -29,7 +29,8 @@ fn err(param: &str, why: &str) -> ParamError {
     }
 }
 
-const BOOLS: [&str; 6] = [
+const BOOLS: [&str; 7] = [
+    "showTitle",
     "credit",
     "labels",
     "dissolve",
@@ -37,7 +38,7 @@ const BOOLS: [&str; 6] = [
     "curvedLabels",
     "cssVars",
 ];
-const INTEGERS: [&str; 4] = ["width", "padding", "precision", "maxInsets"];
+const INTEGERS: [&str; 5] = ["width", "height", "padding", "precision", "maxInsets"];
 const NUMBERS: [&str; 12] = [
     "borderWidth",
     "parentBorderWidth",

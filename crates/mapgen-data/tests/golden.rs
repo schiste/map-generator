@@ -206,3 +206,64 @@ fn curved_labels_by_target() {
         web.contains("<textPath href=\"#label-path-XB\" startOffset=\"50%\">Longland</textPath>")
     );
 }
+
+#[test]
+fn fixed_height_title_caption_and_alt() {
+    let subject = mapgen_data::geojson::read_features(
+        &fixture("twin-regions.geojson"),
+        "id",
+        "name",
+        "region",
+    )
+    .unwrap();
+    let layers = MapLayers {
+        subject,
+        ..MapLayers::default()
+    };
+    let opts = RenderOptions {
+        width: 400,
+        height: Some(200),
+        title: Some("Twin regions".into()),
+        show_title: true,
+        caption: Some("Source: a test fixture drawn by hand, with a caption long enough to need two lines here.".into()),
+        alt: Some("Two regions side by side".into()),
+        ..RenderOptions::default()
+    };
+    let out = render(&layers, &opts).unwrap();
+    // 40 px of title, the 200 px map, two caption lines (2 × 15 + 16).
+    assert_eq!((out.width, out.height), (400, 286));
+    assert!(
+        out.svg
+            .contains(r#"width="400" height="286" viewBox="0 -40 400 286""#),
+        "{}",
+        &out.svg[..300]
+    );
+    assert!(out
+        .svg
+        .contains(r#"<desc id="description">Two regions side by side</desc>"#));
+    assert!(out
+        .svg
+        .contains(r#"<text id="map-title" class="mg-title" x="200""#));
+    assert_eq!(out.svg.matches("<tspan").count(), 2);
+    // The map fills its 400×200 box: the water spans it.
+    assert!(
+        out.svg
+            .contains(r#"<path id="water" class="mg-water" d="M400 200L400 0L0 0L0 200Z"/>"#),
+        "{}",
+        out.svg
+    );
+    // Without them, nothing changes.
+    let plain = render(
+        &layers,
+        &RenderOptions {
+            width: 400,
+            ..RenderOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        !plain.svg.contains("mg-title")
+            && !plain.svg.contains("mg-caption")
+            && plain.svg.contains("viewBox=\"0 0 400")
+    );
+}

@@ -83,7 +83,14 @@ pub struct Panel {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Placement {
     /// The main map: this width, with padding; the height follows.
-    Canvas { width: u32, padding: u32 },
+    Canvas {
+        width: u32,
+        padding: u32,
+        /// A fixed canvas height: the frame widens to its shape (more
+        /// surroundings, no empty bands); without a frame (world maps) the
+        /// map is centred.
+        height: Option<u32>,
+    },
     /// An inset drawn inside this pixel box.
     Box(Rect<f64>),
 }
@@ -257,10 +264,22 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
                 (_, Placement::Box(_)) => 0.1 * b.width().max(b.height()),
                 _ => opts.margin.max(0.0) * b.width().max(b.height()),
             };
-            let r = Rect::new(
+            let mut r = Rect::new(
                 coord! { x: b.min().x - m, y: b.min().y - m },
                 coord! { x: b.max().x + m, y: b.max().y + m },
             );
+            if let Placement::Canvas {
+                width,
+                padding,
+                height: Some(height),
+            } = placement
+            {
+                r = widen_to(
+                    r,
+                    f64::from(width) - 2.0 * f64::from(padding),
+                    f64::from(height) - 2.0 * f64::from(padding),
+                );
+            }
             (Some(r), MultiPolygon(vec![r.to_polygon()]))
         }
         None => {
@@ -590,27 +609,69 @@ fn sphere_outline(p: &MapProjection) -> Polygon<f64> {
     Polygon::new(LineString(pts), vec![])
 }
 
+/// `r` grown on one axis, around its centre, to the shape `w`×`h`.
+fn widen_to(r: Rect<f64>, w: f64, h: f64) -> Rect<f64> {
+    if w <= 0.0 || h <= 0.0 || r.width() <= 0.0 || r.height() <= 0.0 {
+        return r;
+    }
+    let (cx, cy) = (r.center().x, r.center().y);
+    let target = w / h;
+    let (mut dx, mut dy) = (r.width(), r.height());
+    if dx / dy < target {
+        dx = dy * target;
+    } else {
+        dy = dx / target;
+    }
+    Rect::new(
+        coord! { x: cx - dx / 2.0, y: cy - dy / 2.0 },
+        coord! { x: cx + dx / 2.0, y: cy + dy / 2.0 },
+    )
+}
+
 fn fit(frame: Rect<f64>, placement: Placement) -> Result<Viewport> {
     let (dx, dy) = (frame.width(), frame.height());
     if dx <= 0.0 || dy <= 0.0 {
         return Err(Error::DegenerateExtent);
     }
     match placement {
-        Placement::Canvas { width, padding } => {
+        Placement::Canvas {
+            width,
+            padding,
+            height,
+        } => {
             let pad = f64::from(padding);
             let inner_w = f64::from(width) - 2.0 * pad;
             if inner_w <= 0.0 {
                 return Err(Error::DegenerateExtent);
             }
-            let scale = inner_w / dx;
-            Ok(Viewport {
-                min_x: frame.min().x,
-                max_y: frame.max().y,
-                scale,
-                left: pad,
-                top: pad,
-                canvas_height: (dy * scale + 2.0 * pad).ceil(),
-            })
+            match height {
+                None => {
+                    let scale = inner_w / dx;
+                    Ok(Viewport {
+                        min_x: frame.min().x,
+                        max_y: frame.max().y,
+                        scale,
+                        left: pad,
+                        top: pad,
+                        canvas_height: (dy * scale + 2.0 * pad).ceil(),
+                    })
+                }
+                Some(h) => {
+                    let inner_h = f64::from(h) - 2.0 * pad;
+                    if inner_h <= 0.0 {
+                        return Err(Error::DegenerateExtent);
+                    }
+                    let scale = (inner_w / dx).min(inner_h / dy);
+                    Ok(Viewport {
+                        min_x: frame.min().x,
+                        max_y: frame.max().y,
+                        scale,
+                        left: pad + (inner_w - dx * scale) / 2.0,
+                        top: pad + (inner_h - dy * scale) / 2.0,
+                        canvas_height: f64::from(h),
+                    })
+                }
+            }
         }
         Placement::Box(b) => {
             let scale = (b.width() / dx).min(b.height() / dy);

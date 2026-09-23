@@ -15,8 +15,13 @@ gallery map.
   `data-mapgen-contract`.
 - `data-boundary-year` and `data-source-release` are present when the boundary version is
   known.
-- `<title>` holds the map title, when given. `<desc id="attribution">` holds the data credit,
-  when there is one.
+- `<title>` holds the map title, when given. `<desc id="description">` holds a description
+  for screen readers (`alt`), and `<desc id="attribution">` the data credit, when there are
+  any.
+- With a visible title (`show-title`), a 40 px band above the map holds
+  `text#map-title.mg-title`, and the `viewBox` starts at `y = -40`. The map keeps its
+  coordinates: `0,0` is always its top-left corner. With a `caption`, `text#caption.mg-caption`
+  sits in a band under the map. Neither is inside a layer group.
 
 ### Layers
 Main-map groups, bottom to top, by `id` (a group is absent when empty):

@@ -313,6 +313,38 @@
       "description": "Document title."
      },
      {
+      "name": "show-title",
+      "in": "query",
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Draw the title in a band above the map."
+     },
+     {
+      "name": "caption",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "Text drawn under the map (wrapped)."
+     },
+     {
+      "name": "alt",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "Description for screen readers (<desc id=\"description\">)."
+     },
+     {
+      "name": "height",
+      "in": "query",
+      "schema": {
+       "type": "integer"
+      },
+      "description": "Fixed height in pixels; the frame widens to fill it."
+     },
+     {
       "name": "attribution",
       "in": "query",
       "schema": {

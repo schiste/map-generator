@@ -94,6 +94,15 @@ pub struct RenderOptions {
     /// Decimal places kept for path coordinates.
     pub precision: usize,
     pub title: Option<String>,
+    /// A fixed map height in pixels (default: from the map's shape). The
+    /// frame widens to fill it.
+    pub height: Option<u32>,
+    /// Draw the title above the map (it is always in `<title>`).
+    pub show_title: bool,
+    /// Text drawn under the map, e.g. a source or a note.
+    pub caption: Option<String>,
+    /// A description for screen readers (`<desc id="description">`).
+    pub alt: Option<String>,
     /// Data credit, e.g. "Natural Earth; IGN (Etalab Open License 2.0) via
     /// geoBoundaries". Always embedded as `<desc>`; drawn when `credit` is set.
     pub attribution: Option<String>,
@@ -147,6 +156,10 @@ impl Default for RenderOptions {
             padding: 0,
             precision: 1,
             title: None,
+            height: None,
+            show_title: false,
+            caption: None,
+            alt: None,
             attribution: None,
             credit: false,
             boundary_year: None,
@@ -257,6 +270,7 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
         placement: Placement::Canvas {
             width: opts.width,
             padding: opts.padding,
+            height: opts.height,
         },
         opts,
         label_size: opts.theme.label_size,
@@ -380,6 +394,9 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
         panels: &panels,
         theme: &opts.theme,
         title: opts.title.as_deref(),
+        show_title: opts.show_title,
+        caption: opts.caption.as_deref(),
+        alt: opts.alt.as_deref(),
         attribution: credit_with_version(opts).as_deref(),
         boundary_year: opts.boundary_year.as_deref(),
         source_release: opts.source_release.as_deref(),
@@ -389,10 +406,17 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
         region_strokes: opts.border_mode == BorderMode::Regions,
         target: opts.target,
     });
+    // With a title or caption band, the file is taller than the map.
+    let (band_top, caption_lines) = crate::svg::bands(
+        opts.width,
+        opts.title.as_deref(),
+        opts.show_title,
+        opts.caption.as_deref(),
+    );
     Ok(Rendered {
         svg,
         width: opts.width,
-        height: height as u32,
+        height: height as u32 + band_top + crate::svg::caption_band(caption_lines.len()),
         projection,
         outside_frame,
         insets,

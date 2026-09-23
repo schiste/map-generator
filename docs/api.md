@@ -68,7 +68,10 @@ const regions = await api.features("ne-admin1", "FRA"); // codes, names, parents
 ### Map parameters
 
 Query parameters are the `RenderSpec` fields in kebab-case:
-- `width`, `theme`, `labels`, `languages=fr,zh-Hant`, `target=commons|web`, `css-vars`;
+- `width`, `height` (fixed; the frame widens to fill it), `theme`, `labels`,
+  `languages=fr,zh-Hant`, `target=commons|web`, `css-vars`;
+- `title`, `show-title` (draw it above the map), `caption` (under the map), `alt` (for
+  screen readers);
 - `frame`, `bbox`, `projection`, `insets`, `border-mode`, `credit`;
 - colour slots as `color-water=%23c6ecff`, `color-context-land=tan`.
 

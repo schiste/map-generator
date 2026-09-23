@@ -68,6 +68,14 @@ export interface RenderSpec {
   padding?: number;
   precision?: number;
   title?: string;
+  /** Draw the title above the map (it is always the SVG <title>). */
+  showTitle?: boolean;
+  /** Text drawn under the map. */
+  caption?: string;
+  /** A description for screen readers (<desc id="description">). */
+  alt?: string;
+  /** A fixed height in pixels: the frame widens to fill it (default: from the map's shape). */
+  height?: number;
   attribution?: string;
   /** Draw the data credit in the bottom-right corner. */
   credit?: boolean;

@@ -45,7 +45,10 @@ projection,laea
 
 | Key | Values |
 | --- | --- |
-| `title` | text |
+| `title` | text; `show-title,true` draws it above the map |
+| `caption` | text drawn under the map (wrapped to the width) |
+| `alt` | a description for screen readers |
+| `height` | pixels: a fixed height, the frame widening to fill it |
 | `width`, `padding` | pixels |
 | `theme` | `wikimedia`, `light`, `dark`, `mono` |
 | `color-<slot>` | any CSS colour. Slots: `background`, `water`, `land`, `context-land`, `border`, `outline`, `coast`, `context-border`, `lake-border`, `disputed-border`, `label` |

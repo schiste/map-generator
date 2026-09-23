@@ -426,6 +426,15 @@ pub struct RenderSpec {
     pub padding: Option<u32>,
     pub precision: Option<usize>,
     pub title: Option<String>,
+    /// A fixed map height in pixels; the frame widens to fill it.
+    pub height: Option<u32>,
+    /// Draw the title above the map.
+    #[serde(default)]
+    pub show_title: bool,
+    /// Text drawn under the map.
+    pub caption: Option<String>,
+    /// A description for screen readers.
+    pub alt: Option<String>,
     pub attribution: Option<String>,
     #[serde(default)]
     pub credit: bool,
@@ -520,6 +529,13 @@ impl RenderSpec {
                 "width must be between 16 and 20000, got {width}"
             )));
         }
+        if let Some(h) = self.height {
+            if !(50..=10_000).contains(&h) {
+                return Err(SpecError(format!(
+                    "height {h} is out of range (50–10000 px)"
+                )));
+            }
+        }
         let frame = match (&self.bbox, self.frame) {
             (Some(b), _) => FrameMode::BBox(GeoBBox::parse(b)?),
             (None, Frame::Auto) => FrameMode::Auto,
@@ -531,6 +547,10 @@ impl RenderSpec {
             padding: self.padding.unwrap_or(d.padding),
             precision: self.precision.unwrap_or(d.precision).min(6),
             title: self.title.clone(),
+            height: self.height,
+            show_title: self.show_title,
+            caption: self.caption.clone().filter(|c| !c.trim().is_empty()),
+            alt: self.alt.clone(),
             attribution: self.attribution.clone(),
             credit: self.credit,
             boundary_year: self.boundary_year.clone(),
