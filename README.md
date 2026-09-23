@@ -200,7 +200,7 @@ read (SQL / R-tree) ─► clusters: main frame + insets ─► per panel: pick 
    ─► borders by kind + labels ─► themed SVG / HTML
 ```
 
-See [docs/architecture.md](docs/architecture.md).
+See [docs/architecture.md](docs/architecture.md). Tools that read or colour the maps can rely on the [SVG contract](docs/contract.md).
 
 ## Data and licensing
 

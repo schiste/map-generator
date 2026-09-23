@@ -34,4 +34,5 @@ pub use pipeline::{
     render, BorderMode, InsetInfo, InsetMode, MapLayers, RenderOptions, Rendered, Target,
 };
 pub use projection::{MapProjection, Projection, ProjectionChoice};
+pub use svg::CONTRACT_VERSION;
 pub use theme::{Color, Theme};

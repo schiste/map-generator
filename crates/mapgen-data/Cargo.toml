@@ -25,4 +25,5 @@ default = ["gpkg"]
 gpkg = ["dep:rusqlite", "dep:geozero"]
 
 [dev-dependencies]
+roxmltree = "0.20"
 rusqlite = { version = "0.37", features = ["bundled"] }

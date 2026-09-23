@@ -7,6 +7,11 @@ use crate::feature::MapFeature;
 use crate::labels::{letters, Label, LabelShape};
 use crate::panel::{BorderKind, Panel};
 use crate::pipeline::Target;
+
+/// Version of the SVG contract (`docs/contract.md`): the attributes, ids
+/// and classes that tools colouring our maps can rely on. Bumped only when
+/// one is removed or changes meaning.
+pub const CONTRACT_VERSION: u32 = 1;
 use crate::theme::Theme;
 
 /// Affine transform from projected metres to SVG pixels (y axis flipped).
@@ -79,7 +84,7 @@ pub fn write_svg(doc: &SvgDocument) -> String {
     .collect();
     let _ = writeln!(
         out,
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\"{version}>"
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\" data-mapgen-contract=\"{CONTRACT_VERSION}\"{version}>"
     );
     if let Some(title) = doc.title {
         let _ = writeln!(out, "<title>{}</title>", escape(title));
@@ -344,6 +349,12 @@ fn path_element(id: &str, layer_class: &str, f: &MapFeature, d: &str) -> String 
         .as_deref()
         .map(|p| format!(" data-parent=\"{}\"", escape(p)))
         .unwrap_or_default();
+    let parent_name = f
+        .parent
+        .as_ref()
+        .and(f.parent_name.as_deref())
+        .map(|p| format!(" data-parent-name=\"{}\"", escape(p)))
+        .unwrap_or_default();
     let units = if f.units.is_empty() {
         String::new()
     } else {
@@ -354,7 +365,7 @@ fn path_element(id: &str, layer_class: &str, f: &MapFeature, d: &str) -> String 
         _ => f.name.clone(),
     };
     format!(
-        "<path id=\"{}\" class=\"{}\" data-name=\"{}\" data-code=\"{}\"{parent}{units} d=\"{d}\"><title>{}</title></path>",
+        "<path id=\"{}\" class=\"{}\" data-name=\"{}\" data-code=\"{}\"{parent}{parent_name}{units} d=\"{d}\"><title>{}</title></path>",
         escape(id),
         escape(&classes.join(" ")),
         escape(&f.name),
@@ -746,7 +757,7 @@ mod tests {
         assert_eq!(
             p,
             "<path id=\"US-31109\" class=\"mg-land subdivision us\" data-name=\"Lancaster\" \
-             data-code=\"US-31109\" data-parent=\"US-31\" d=\"M0 0Z\"><title>Lancaster, Nebraska</title></path>"
+             data-code=\"US-31109\" data-parent=\"US-31\" data-parent-name=\"Nebraska\" d=\"M0 0Z\"><title>Lancaster, Nebraska</title></path>"
         );
         let bare = MapFeature {
             id: "x".into(),
