@@ -109,8 +109,10 @@ a rule, such as a split without weights, give `422` with a `conflicts` list, unl
 ## Responses
 
 - **Content types:** `image/svg+xml`, `application/json`, `text/html` and `text/csv`, all in UTF-8.
-- **Caching:** `ETag` gives `304` on `If-None-Match`. `Cache-Control` is `public, max-age=86400`,
-  or `immutable` with `release=`.
+- **Caching:** `ETag` gives `304` on `If-None-Match`. Maps are `public, max-age=2592000` (30
+  days, since data changes only with a release), or `immutable` for a year with `release=`.
+  Listings (datasets, regions, features, crosswalks) are cached for a day, and
+  `health`/`version` not at all.
 - **Provenance headers:** `Content-Location` (the canonical URL), `Link: <licence>; rel="license"`,
   `X-Mapgen-Version`, `X-Mapgen-Contract` and `X-Dataset-Release`. All are exposed to
   cross-origin scripts.

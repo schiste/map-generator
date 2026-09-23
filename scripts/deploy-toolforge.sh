@@ -100,13 +100,36 @@ if [[ "$www" -eq 1 ]]; then
   cp "$d/ne_10m_admin_1.geojson" "$stage/data/ne_10m_admin_1_states_provinces.geojson"
   cp "$d/ne_10m_lakes.geojson" "$stage/data/ne_10m_lakes.geojson"
   cp "$d/ne_10m_disputed_lines.geojson" "$stage/data/ne_10m_admin_0_boundary_lines_disputed_areas.geojson"
-  python3 - "$stage/index.html" <<'PY'
-import sys
-p = sys.argv[1]
-html = open(p, encoding="utf-8").read()
+  # Name the engine and data folders after their content (pkg-<hash>,
+  # data-<hash>): the server caches those for a year (immutable), and a
+  # deploy that changes them changes their URLs. A code-only deploy keeps
+  # the data folder's name, so nobody downloads the data again.
+  python3 - "$stage" <<'PY'
+import hashlib, os, sys
+stage = sys.argv[1]
+
+def digest(folder):
+    h = hashlib.sha256()
+    for name in sorted(os.listdir(folder)):
+        h.update(name.encode())
+        with open(os.path.join(folder, name), "rb") as f:
+            h.update(f.read())
+    return h.hexdigest()[:12]
+
+pkg, data = f"pkg-{digest(os.path.join(stage, 'pkg'))}", f"data-{digest(os.path.join(stage, 'data'))}"
+os.rename(os.path.join(stage, "pkg"), os.path.join(stage, pkg))
+os.rename(os.path.join(stage, "data"), os.path.join(stage, data))
+
+def rewrite(name, old, new):
+    p = os.path.join(stage, name)
+    text = open(p, encoding="utf-8").read()
+    assert old in text, (name, old)
+    open(p, "w", encoding="utf-8").write(text.replace(old, new, 1))
+
+rewrite("app.js", '"./pkg/mapgen_wasm.js"', f'"./{pkg}/mapgen_wasm.js"')
 tag = '<meta charset="utf-8">'
-assert tag in html
-open(p, "w", encoding="utf-8").write(html.replace(tag, tag + '\n<meta name="mapgen-data" content="data/">', 1))
+rewrite("index.html", tag, f'{tag}\n<meta name="mapgen-data" content="{data}/">')
+print(f"playground: {pkg}, {data}")
 PY
   upload "$stage/" "$project/www/" --delete
 fi

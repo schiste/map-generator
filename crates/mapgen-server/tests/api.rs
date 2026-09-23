@@ -69,14 +69,34 @@ files = "twin-files/{region}.geojson"
 }
 
 fn server(name: &str) -> (Router, PathBuf) {
+    server_with(name, false)
+}
+
+/// With `www`: a playground with hashed folders, as deploy-toolforge.sh makes.
+fn server_with(name: &str, www: bool) -> (Router, PathBuf) {
     let dir = data_dir(name);
+    let www_dir = www.then(|| {
+        let w = dir.join("www");
+        for (f, body) in [
+            ("index.html", "<!doctype html>"),
+            ("app.js", "import './pkg-0123abcd/mapgen_wasm.js';"),
+            ("pkg-0123abcd/mapgen_wasm.js", "export {}"),
+            ("data-89abcdef/countries.geojson", "{}"),
+            ("pkg/unhashed.js", "export {}"),
+        ] {
+            let path = w.join(f);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        w
+    });
     let settings = Settings {
         data_dir: dir.clone(),
         cache_dir: Some(dir.join("cache")),
         cache_max_bytes: 10_000_000,
         max_concurrent: 2,
         render_timeout: Duration::from_secs(20),
-        www_dir: None,
+        www_dir,
         max_width: 4000,
     };
     (app(Arc::new(AppState::new(settings).unwrap())), dir)
@@ -433,5 +453,49 @@ async fn cross_origin_requests_are_allowed() {
     .await;
     assert_eq!(r.header("access-control-allow-origin"), "*");
     assert!(r.header("access-control-expose-headers").contains("etag"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn cache_headers() {
+    let (app, dir) = server_with("cache", true);
+    let cc = |r: &Reply| r.header("cache-control").to_owned();
+    // Playground: hashed folders forever, the rest revalidated.
+    assert_eq!(
+        cc(&get(&app, "/pkg-0123abcd/mapgen_wasm.js").await),
+        "public, max-age=31536000, immutable"
+    );
+    assert_eq!(
+        cc(&get(&app, "/data-89abcdef/countries.geojson").await),
+        "public, max-age=31536000, immutable"
+    );
+    assert_eq!(cc(&get(&app, "/pkg/unhashed.js").await), "no-cache");
+    assert_eq!(cc(&get(&app, "/app.js").await), "no-cache");
+    let index = get(&app, "/").await;
+    assert_eq!(
+        (index.status, cc(&index)),
+        (StatusCode::OK, "no-cache".to_owned())
+    );
+    // API: maps for 30 days (a year when pinned), listings for a day,
+    // health and version always fresh, errors not cached.
+    assert_eq!(
+        cc(&get(&app, "/api/v1/maps/twin/world.svg").await),
+        "public, max-age=2592000"
+    );
+    assert_eq!(
+        cc(&get(&app, "/api/v1/datasets").await),
+        "public, max-age=86400"
+    );
+    assert_eq!(
+        cc(&get(&app, "/api/v1/datasets/twin/regions/world/features").await),
+        "public, max-age=86400"
+    );
+    assert_eq!(
+        cc(&get(&app, "/api/v1/client.js").await),
+        "public, max-age=86400"
+    );
+    assert_eq!(cc(&get(&app, "/api/v1/health").await), "no-cache");
+    assert_eq!(cc(&get(&app, "/api/v1/version").await), "no-cache");
+    assert_eq!(cc(&get(&app, "/api/v1/maps/twin/XX.svg").await), "");
     let _ = std::fs::remove_dir_all(dir);
 }

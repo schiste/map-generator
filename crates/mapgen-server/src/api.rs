@@ -106,8 +106,56 @@ pub fn app(state: Arc<AppState>) -> Router {
         .layer(DefaultBodyLimit::max(BODY_LIMIT))
         .layer(CompressionLayer::new())
         .layer(cors)
+        .layer(middleware::from_fn(cache_policy))
         .layer(middleware::from_fn(log))
         .with_state(state)
+}
+
+/// Maps change only with a deploy or a data release, so they're kept for
+/// 30 days (clients needing the newest can revalidate with the ETag, or pin
+/// `release=` for an immutable URL).
+const MAPS_CACHE: &str = "public, max-age=2592000";
+const DAY: &str = "public, max-age=86400";
+const IMMUTABLE: &str = "public, max-age=31536000, immutable";
+
+/// `Cache-Control` for successful responses that don't set their own:
+/// listings and static API files for a day; health and version never;
+/// playground files under content-hashed folders (`pkg-<hash>/`,
+/// `data-<hash>/`, see scripts/deploy-toolforge.sh) for a year, and the
+/// rest of the playground (index.html, app.js) revalidated every time so a
+/// deploy shows at once.
+async fn cache_policy(req: Request, next: Next) -> Response {
+    let path = req.uri().path().to_owned();
+    let get = req.method() == Method::GET || req.method() == Method::HEAD;
+    let mut res = next.run(req).await;
+    let ok = res.status().is_success() || res.status() == StatusCode::NOT_MODIFIED;
+    if !get || !ok || res.headers().contains_key(header::CACHE_CONTROL) {
+        return res;
+    }
+    let policy = if let Some(api) = path.strip_prefix("/api/") {
+        match api.trim_start_matches("v1").trim_start_matches('/') {
+            "health" | "version" | "" => "no-cache",
+            _ => DAY,
+        }
+    } else if path == "/healthz" {
+        "no-cache"
+    } else if path.split('/').any(is_hashed_dir) {
+        IMMUTABLE
+    } else {
+        "no-cache"
+    };
+    res.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static(policy));
+    res
+}
+
+/// `pkg-1a2b3c4d`, `data-0f9e8d7c`: a folder named after its content.
+fn is_hashed_dir(segment: &str) -> bool {
+    ["pkg-", "data-"].iter().any(|p| {
+        segment
+            .strip_prefix(p)
+            .is_some_and(|h| h.len() >= 8 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+    })
 }
 
 /// One line per request: method, path, status, time. No IP addresses or
@@ -176,10 +224,7 @@ async fn openapi() -> impl IntoResponse {
 
 async fn client() -> impl IntoResponse {
     (
-        [
-            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
-            (header::CACHE_CONTROL, "public, max-age=3600"),
-        ],
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         CLIENT,
     )
 }
@@ -524,11 +569,7 @@ fn map_response(
     set(
         h,
         header::CACHE_CONTROL,
-        if pinned {
-            "public, max-age=31536000, immutable"
-        } else {
-            "public, max-age=86400"
-        },
+        if pinned { IMMUTABLE } else { MAPS_CACHE },
     );
     set(h, header::CONTENT_LOCATION, canonical);
     set(

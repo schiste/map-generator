@@ -60,7 +60,11 @@ release ids in the licence sidecars), and `/api/v1/version` reports the release 
   (`ln -sfn releases/<older> current.new && mv -Tf current.new current`), then restart. The
   three newest releases are kept. Code: `scripts/deploy-toolforge.sh --build <tag> --restart --apply`.
 - **Cache.** It is keyed by mapgen version, build commit and dataset release, so a new deploy
-  or data release never serves stale maps. `rm -rf cache/*` is always safe.
+  or data release never serves stale maps.
+- **Browser caching.** Maps are cached for 30 days (a year with `release=`), listings for a
+  day, and `health`/`version` never. The playground's engine and data sit in folders named
+  after their content (`pkg-<hash>/`, `data-<hash>/`), cached for a year as immutable.
+  `index.html` and `app.js` are revalidated on every visit, so a deploy shows at once. `rm -rf cache/*` is always safe.
 - **Resources.** `toolforge webservice buildservice status`. If renders queue, raise `cpu`/`mem`
   in `toolforge/service.template` (within the tool's quota) and `MAPGEN_MAX_CONCURRENT`.
 
