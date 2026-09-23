@@ -9,7 +9,7 @@
 //! `lon0 ± 180°`. [`split_at_seam`] cuts polygons along it before projecting.
 
 use geo::{BooleanOps, MapCoords};
-use geo_types::{coord, Coord, LineString, MultiPolygon, Polygon, Rect};
+use geo_types::{coord, Coord, LineString, MultiLineString, MultiPolygon, Polygon, Rect};
 
 /// Wraps a longitude difference or absolute longitude into `[-180, 180)`.
 pub fn wrap_longitude(lon: f64) -> f64 {
@@ -97,18 +97,62 @@ pub fn split_at_seam(mp: &MultiPolygon<f64>, lon0: f64) -> MultiPolygon<f64> {
 
 /// Longitudes relative to `lon0`, made continuous along the ring (no jump
 /// larger than 180° between consecutive vertices).
+///
+/// Each value is `wrap(lon - lon0)` plus a whole multiple of 360°, never an
+/// accumulated sum, so a vertex shared by two rings gets bit-identical output
+/// in both (shared borders stay shared after seam splitting).
 fn unwrap_relative(ring: &LineString<f64>, lon0: f64) -> LineString<f64> {
     let mut out: Vec<Coord<f64>> = Vec::with_capacity(ring.0.len());
-    let mut prev: Option<(f64, f64)> = None; // (raw lon, relative lon)
+    let mut prev: Option<f64> = None;
     for c in &ring.0 {
+        let w = wrap_longitude(c.x - lon0);
         let rel = match prev {
-            None => wrap_longitude(c.x - lon0),
-            Some((raw, rel)) => rel + wrap_longitude(c.x - raw),
+            None => w,
+            Some(p) => w + 360.0 * ((p - w) / 360.0).round(),
         };
-        prev = Some((c.x, rel));
+        prev = Some(rel);
         out.push(coord! { x: rel, y: c.y });
     }
     LineString(out)
+}
+
+/// Rewrites longitude +180° as −180°. Datasets cut polygons at the
+/// antimeridian with vertices on both; when the projection has no seam there
+/// (LAEA, conic, or Equal Earth not centred on 0°) the two sides then share
+/// exact vertices, so the cut is recognised as internal and never drawn.
+pub fn canonicalize_antimeridian(mp: &MultiPolygon<f64>) -> MultiPolygon<f64> {
+    mp.map_coords(|c| coord! { x: if c.x == 180.0 { -180.0 } else { c.x }, y: c.y })
+}
+
+/// [`split_at_seam`] for lines: output longitudes satisfy `lon - lon0 ∈ [-180, 180]`.
+pub fn split_lines_at_seam(ml: &MultiLineString<f64>, lon0: f64) -> MultiLineString<f64> {
+    let mut out = Vec::new();
+    for line in ml {
+        let mut rel = unwrap_relative(line, lon0);
+        let (a, b) = x_range(&rel);
+        let k = (((a + b) / 2.0 + 180.0) / 360.0).floor();
+        shift_x(&mut rel, -360.0 * k);
+        let (a, b) = (a - 360.0 * k, b - 360.0 * k);
+        if a >= -180.0 && b <= 180.0 {
+            out.push(rel);
+            continue;
+        }
+        let k_min = ((a + 180.0) / 360.0).floor() as i32;
+        let k_max = ((b - 180.0) / 360.0).ceil() as i32;
+        let lines = MultiLineString(vec![rel]);
+        for k in k_min..=k_max {
+            let off = 360.0 * f64::from(k);
+            let strip = Rect::new(
+                coord! { x: -180.0 + off, y: -90.0 },
+                coord! { x: 180.0 + off, y: 90.0 },
+            )
+            .to_polygon();
+            for part in strip.clip(&lines, false) {
+                out.push(part.map_coords(|c| coord! { x: c.x - off, y: c.y }));
+            }
+        }
+    }
+    MultiLineString(out).map_coords(|c| coord! { x: c.x + lon0, y: c.y })
 }
 
 fn x_range(ls: &LineString<f64>) -> (f64, f64) {
@@ -185,6 +229,41 @@ mod tests {
         assert!((out.unsigned_area() - 200.0).abs() < 1e-6);
         for c in out.0.iter().flat_map(|p| p.exterior().0.iter()) {
             assert!(c.x >= -180.0 - 1e-9 && c.x <= 180.0 + 1e-9);
+        }
+    }
+
+    #[test]
+    fn shared_vertices_unwrap_identically_whatever_the_path() {
+        // The same vertex reached from different predecessors must get the
+        // same relative longitude, bit for bit.
+        let v = 179.123456789;
+        let a = unwrap_relative(&LineString::from(vec![(-179.9, 0.0), (v, 1.0)]), 37.3);
+        let b = unwrap_relative(&LineString::from(vec![(178.0, 5.0), (v, 1.0)]), 37.3);
+        assert_eq!(a.0[1].x.to_bits(), b.0[1].x.to_bits());
+    }
+
+    #[test]
+    fn canonicalizes_plus_180() {
+        let p = MultiPolygon(vec![Polygon::new(
+            LineString::from(vec![(179.0, 0.0), (180.0, 0.0), (180.0, 1.0), (179.0, 0.0)]),
+            vec![],
+        )]);
+        let xs: Vec<f64> = canonicalize_antimeridian(&p).0[0]
+            .exterior()
+            .0
+            .iter()
+            .map(|c| c.x)
+            .collect();
+        assert_eq!(xs, [179.0, -180.0, -180.0, 179.0]);
+    }
+
+    #[test]
+    fn lines_split_at_seam() {
+        let l = MultiLineString(vec![LineString::from(vec![(170.0, 0.0), (-170.0, 0.0)])]);
+        let out = split_lines_at_seam(&l, 0.0);
+        assert_eq!(out.0.len(), 2);
+        for c in out.0.iter().flat_map(|l| l.0.iter()) {
+            assert!(c.x.abs() <= 180.0 + 1e-9);
         }
     }
 
