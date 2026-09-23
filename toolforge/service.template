@@ -1,0 +1,7 @@
+# Toolforge webservice for https://map-generator.toolforge.org/
+# (the image is built from this repository by the Toolforge Build Service).
+type: buildservice
+mount: all
+health-check-path: /api/v1/health
+cpu: 1
+mem: 2Gi

@@ -1,7 +1,11 @@
 import init, { MapGenerator, themes, bboxPresets, version } from "./pkg/mapgen_wasm.js";
 
-// Pinned to the same Natural Earth commit as scripts/fetch-data.sh.
-const NE = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/ca96624a56bd078437bca8184e78163e5039ad19/geojson/";
+// Pinned to the same Natural Earth commit as scripts/fetch-data.sh. A
+// deployment can serve the files itself (<meta name="mapgen-data" content="data/">),
+// so visitors' browsers contact no third party (Toolforge's rule).
+const NE =
+  document.querySelector('meta[name="mapgen-data"]')?.content ||
+  "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/ca96624a56bd078437bca8184e78163e5039ad19/geojson/";
 const SAMPLES = {
   "ne-admin0": NE + "ne_10m_admin_0_countries.geojson",
   "ne-admin1": NE + "ne_10m_admin_1_states_provinces.geojson",
