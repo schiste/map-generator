@@ -22,6 +22,7 @@ rayon.workspace = true
 clap = { version = "4", features = ["derive"] }
 serde.workspace = true
 serde_json.workspace = true
+sha1_smol = "1"
 
 [features]
 # EPSG projections through PROJ (`--projection epsg:5070`); needs libproj.

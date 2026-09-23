@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -22,6 +22,7 @@ use mapgen_data::{
 };
 use rayon::prelude::*;
 
+mod commons;
 mod join;
 
 /// Deterministic SVG map generator.
@@ -744,6 +745,45 @@ struct BatchArgs {
     /// Check each map's input (see `mapgen check`) and report issue counts.
     #[arg(long)]
     check: bool,
+    /// Name each map from a template, e.g. "Map of {name} ({level}).svg".
+    /// Placeholders: {code} (region code), {name} (its name in --context,
+    /// else the code), {level} (e.g. ADM1), {year} (boundary year), {stem}
+    /// (input file name). Names are made valid Wikimedia Commons titles.
+    #[arg(long)]
+    name_template: Option<String>,
+    /// Write a manifest for uploading to Wikimedia Commons: .json, or .csv
+    /// with Pattypan's columns (path, name, description, date, source,
+    /// author, permission, other_versions, license, categories) plus each
+    /// map's file name, SHA-1, region, data credit and boundary version.
+    #[arg(long)]
+    manifest: Option<PathBuf>,
+    /// Also write a `<map>.wikitext` description page next to each map.
+    #[arg(long)]
+    wikitext: bool,
+    /// {{Information}} description; placeholders as in --name-template, plus
+    /// {data} (the data credit).
+    #[arg(long, default_value = "{{en|1=Map of {name}}}")]
+    description: String,
+    /// {{Information}} source.
+    #[arg(
+        long,
+        default_value = "{{own}}, made with [https://github.com/schiste/map-generator map-generator] from {data}"
+    )]
+    source: String,
+    /// {{Information}} author, e.g. "[[User:Example|Example]]".
+    #[arg(long, default_value = "")]
+    author: String,
+    /// {{Information}} date, e.g. 2026-09-23 (not filled in automatically, so
+    /// output stays reproducible).
+    #[arg(long, default_value = "")]
+    date: String,
+    /// Licence wikitext, e.g. "{{self|cc-by-sa-4.0}}". With share-alike data
+    /// the maps must carry a compatible share-alike licence.
+    #[arg(long, default_value = "")]
+    license: String,
+    /// Categories, comma-separated, placeholders allowed: "Blank maps of {name}".
+    #[arg(long, value_delimiter = ',')]
+    categories: Vec<String>,
     #[command(flatten)]
     style: StyleArgs,
     #[command(flatten)]
@@ -1009,8 +1049,9 @@ struct Batch<'a> {
     html: bool,
 }
 
-/// `(output name, Ok(note) | Err)`; the note summarises `--check` findings.
-type JobResult = (String, Result<String>);
+/// `(output name, Ok((note, manifest row)) | Err)`; the note summarises
+/// `--check` findings.
+type JobResult = (String, Result<(String, commons::ManifestRow)>);
 
 fn run_batch(args: BatchArgs) -> Result<()> {
     let files = expand_inputs(&args.input)?
@@ -1031,6 +1072,11 @@ fn run_batch(args: BatchArgs) -> Result<()> {
         args: &args,
     };
 
+    if let Some(template) = &args.name_template {
+        // Fail once, before rendering anything, on a mistyped placeholder.
+        commons::file_name(template, &batch.vars(&files[0], None))?;
+    }
+
     // Parallel over files, and over regions within a file. Each file is read
     // only by the job that renders it, so memory stays bounded.
     let results: Vec<JobResult> = files
@@ -1043,10 +1089,12 @@ fn run_batch(args: BatchArgs) -> Result<()> {
         .collect();
 
     let mut ok = 0;
+    let mut rows = Vec::new();
     for (label, r) in &results {
         match r {
-            Ok(note) => {
+            Ok((note, row)) => {
                 ok += 1;
+                rows.push(row.clone());
                 if !note.is_empty() {
                     eprintln!("{label}: {note}");
                 }
@@ -1071,6 +1119,32 @@ fn run_batch(args: BatchArgs) -> Result<()> {
             "note: share-alike data licence for {}; maps made from them must be shared under the same licence",
             share_alike.join(", ")
         );
+    }
+    let duplicates = commons::duplicate_names(&rows);
+    if let Some((name, paths)) = duplicates.first() {
+        bail!(
+            "{} name(s) given to several maps, e.g. {name:?} ({} maps): add {{code}} to --name-template",
+            duplicates.len(),
+            paths.len()
+        );
+    }
+    if args.manifest.is_some() || args.wikitext {
+        if args.license.is_empty() {
+            eprintln!("note: no --license: fill in each map's licence before uploading");
+        }
+        let sa_license = ["-sa", "sa-", "odbl"]
+            .iter()
+            .any(|t| args.license.to_ascii_lowercase().contains(t));
+        if !share_alike.is_empty() && !args.license.is_empty() && !sa_license {
+            eprintln!(
+                "warning: --license {:?} doesn't look share-alike, but the data licence is",
+                args.license
+            );
+        }
+    }
+    if let Some(path) = &args.manifest {
+        commons::write_manifest(path, &mut rows)?;
+        eprintln!("wrote {} ({} map(s))", path.display(), rows.len());
     }
     if results.is_empty() {
         bail!("no regions matched");
@@ -1102,9 +1176,10 @@ impl Batch<'_> {
 
         if self.query.filter_column.is_none() {
             // No region column: the whole file is one map.
-            let job = || -> Result<String> {
+            let job = || -> Result<(String, commons::ManifestRow)> {
+                let out = self.out_name(file, None, true)?;
                 let subject = read_layer(file, &self.query, None)?;
-                self.render_to(file, None, subject, &file_stem)
+                self.render_to(file, None, subject, &out)
             };
             return vec![(file_stem.clone(), job())];
         }
@@ -1124,11 +1199,15 @@ impl Batch<'_> {
                 let single = groups.len() == 1;
                 groups
                     .into_par_iter()
-                    .map(|(code, subject)| {
-                        let out = self.out_stem(&file_stem, &code, single);
-                        let r = self.render_to(file, Some(&code), subject, &out);
-                        (out, r)
-                    })
+                    .map(
+                        |(code, subject)| match self.out_name(file, Some(&code), single) {
+                            Ok(out) => {
+                                let r = self.render_to(file, Some(&code), subject, &out);
+                                (out, r)
+                            }
+                            Err(e) => (code, Err(e)),
+                        },
+                    )
                     .collect()
             }
             Format::GeoPackage => {
@@ -1140,24 +1219,79 @@ impl Batch<'_> {
                 let single = regions.len() == 1;
                 regions
                     .par_iter()
-                    .map(|code| {
-                        let out = self.out_stem(&file_stem, code, single);
-                        let r = read_layer(file, &self.query, Some(code))
-                            .map_err(anyhow::Error::from)
-                            .and_then(|subject| self.render_to(file, Some(code), subject, &out));
-                        (out, r)
+                    .map(|code| match self.out_name(file, Some(code), single) {
+                        Ok(out) => {
+                            let r = read_layer(file, &self.query, Some(code))
+                                .map_err(anyhow::Error::from)
+                                .and_then(|subject| {
+                                    self.render_to(file, Some(code), subject, &out)
+                                });
+                            (out, r)
+                        }
+                        Err(e) => (code.clone(), Err(e)),
                     })
                     .collect()
             }
         }
     }
 
-    fn out_stem(&self, file_stem: &str, code: &str, single_region: bool) -> String {
-        match (self.multi, single_region) {
-            (false, _) => file_safe(code),
-            (true, true) => file_safe(file_stem),
-            (true, false) => file_safe(&format!("{file_stem}-{code}")),
+    /// A map's file name, without extension: from --name-template, else
+    /// the region code (one input file), the file stem, or both.
+    fn out_name(&self, file: &Path, code: Option<&str>, single_region: bool) -> Result<String> {
+        if let Some(template) = &self.args.name_template {
+            let name = commons::file_name(template, &self.vars(file, code))?;
+            let stem = [".svg", ".html"]
+                .iter()
+                .find_map(|ext| name.strip_suffix(ext))
+                .unwrap_or(&name);
+            return Ok(stem.to_owned());
         }
+        let file_stem = stem(file);
+        Ok(match (code, self.multi, single_region) {
+            (None, ..) => file_safe(&file_stem),
+            (Some(code), false, _) => file_safe(code),
+            (Some(_), true, true) => file_safe(&file_stem),
+            (Some(code), true, false) => file_safe(&format!("{file_stem}-{code}")),
+        })
+    }
+
+    /// Placeholder values for --name-template and the description fields.
+    fn vars(&self, file: &Path, code: Option<&str>) -> BTreeMap<&'static str, String> {
+        let file_stem = stem(file);
+        let code = code.map_or_else(|| file_stem.clone(), str::to_owned);
+        let license = read_license(file);
+        let name = self
+            .context
+            .countries
+            .iter()
+            .find(|f| f.id == code)
+            .map_or_else(|| code.clone(), |f| f.name.clone());
+        let level = license
+            .as_ref()
+            .and_then(|l| l.level.clone())
+            .unwrap_or_else(|| match self.args.data.dataset {
+                Dataset::NeAdmin0 => "ADM0".into(),
+                Dataset::NeAdmin1 => "ADM1".into(),
+                _ => String::new(),
+            });
+        let year = self
+            .args
+            .data
+            .boundary_year
+            .clone()
+            .or_else(|| license.as_ref().and_then(|l| l.year.clone()))
+            .unwrap_or_default();
+        BTreeMap::from([
+            ("code", code),
+            ("name", name),
+            ("level", level),
+            ("year", year),
+            ("stem", file_stem),
+            (
+                "data",
+                self.args.data.attribution(file).0.unwrap_or_default(),
+            ),
+        ])
     }
 
     fn render_to(
@@ -1166,7 +1300,7 @@ impl Batch<'_> {
         code: Option<&str>,
         mut subject: Vec<MapFeature>,
         out_stem: &str,
-    ) -> Result<String> {
+    ) -> Result<(String, commons::ManifestRow)> {
         if subject.is_empty() {
             bail!("no features");
         }
@@ -1213,14 +1347,43 @@ impl Batch<'_> {
         } else {
             rendered.svg
         };
-        std::fs::write(&out, body).with_context(|| format!("writing {}", out.display()))?;
+        std::fs::write(&out, &body).with_context(|| format!("writing {}", out.display()))?;
         if !rendered.outside_frame.is_empty() {
             notes.push(format!(
                 "warning: {} region(s) have no shape on the map",
                 rendered.outside_frame.len()
             ));
         }
-        Ok(notes.join("; "))
+        let vars = self.vars(file, code);
+        let (credit, share_alike) = args.data.attribution(file);
+        let row = commons::ManifestRow {
+            path: out.display().to_string(),
+            name: out_stem.to_owned(),
+            description: commons::fill(&args.description, &vars),
+            date: args.date.clone(),
+            source: commons::fill(&args.source, &vars),
+            author: args.author.clone(),
+            license: args.license.clone(),
+            categories: args
+                .categories
+                .iter()
+                .map(|c| commons::fill(c, &vars))
+                .collect(),
+            file_name: format!("{out_stem}.{ext}"),
+            sha1: commons::sha1_hex(body.as_bytes()),
+            region: vars["code"].clone(),
+            data_credit: credit.unwrap_or_default(),
+            share_alike,
+            boundary_year: opts.boundary_year.clone().unwrap_or_default(),
+            source_release: opts.source_release.clone().unwrap_or_default(),
+            ..commons::ManifestRow::default()
+        };
+        if args.wikitext {
+            let page = args.out_dir.join(format!("{out_stem}.wikitext"));
+            std::fs::write(&page, commons::wikitext(&row))
+                .with_context(|| format!("writing {}", page.display()))?;
+        }
+        Ok((notes.join("; "), row))
     }
 }
 
@@ -1644,6 +1807,9 @@ struct LicenseFile {
     /// Dataset release (boundary id, build date, commit).
     #[serde(default)]
     release: Option<String>,
+    /// Administrative level (geoBoundaries `ADM1`…).
+    #[serde(default)]
+    level: Option<String>,
 }
 
 impl LicenseFile {
@@ -1739,6 +1905,7 @@ mod tests {
             via: Some("geoBoundaries".into()),
             year: None,
             release: None,
+            level: None,
         }
     }
 
