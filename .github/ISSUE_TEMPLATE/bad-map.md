@@ -10,6 +10,6 @@ labels: rendering
 mapgen render ...
 ```
 
-**Dataset and version** (e.g. GADM 4.1, Natural Earth 5.1.2):
+**Dataset and version** (e.g. Natural Earth 5.1.2, geoBoundaries FRA ADM2):
 
 **What looks wrong** (attach the SVG or a screenshot):

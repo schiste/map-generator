@@ -1,9 +1,9 @@
 //! Reads a tiny GeoPackage built on the fly, so the SQL path is tested
-//! without downloading GADM or Natural Earth.
+//! without downloading any dataset.
 
 use std::path::PathBuf;
 
-use mapgen_data::{list_regions, read_layer, Source};
+use mapgen_data::{list_regions, read_layer, LayerQuery};
 use rusqlite::Connection;
 
 /// GeoPackage geometry blob: `GP` header (v0, little-endian, no envelope,
@@ -32,30 +32,24 @@ fn square(x: f64, y: f64) -> Vec<u8> {
     ])
 }
 
-fn build_gadm_like() -> PathBuf {
+fn build_admin_layer() -> PathBuf {
     let path = std::env::temp_dir().join(format!("mapgen-test-{}.gpkg", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let conn = Connection::open(&path).unwrap();
     conn.execute_batch(
         "CREATE TABLE gpkg_geometry_columns (table_name TEXT, column_name TEXT);
-         INSERT INTO gpkg_geometry_columns VALUES ('ADM_1', 'geom');
-         CREATE TABLE ADM_1 (GID_0 TEXT, GID_1 TEXT, NAME_1 TEXT, ISO_1 TEXT, geom BLOB);",
+         INSERT INTO gpkg_geometry_columns VALUES ('admin1', 'geom');
+         CREATE TABLE admin1 (country TEXT, uid TEXT, name TEXT, iso TEXT, geom BLOB);",
     )
     .unwrap();
     let rows = [
-        (
-            "FRA",
-            "FRA.11_1",
-            "Île-de-France",
-            "FR-IDF",
-            square(2.0, 48.0),
-        ),
-        ("FRA", "FRA.5_1", "Corse", "NA", square(9.0, 42.0)),
-        ("BEL", "BEL.1_1", "Bruxelles", "BE-BRU", square(4.0, 50.0)),
+        ("FRA", "fr-11", "Île-de-France", "FR-IDF", square(2.0, 48.0)),
+        ("FRA", "fr-05", "Corse", "NA", square(9.0, 42.0)),
+        ("BEL", "be-01", "Bruxelles", "BE-BRU", square(4.0, 50.0)),
     ];
     for (g0, g1, name, iso, geom) in rows {
         conn.execute(
-            "INSERT INTO ADM_1 VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO admin1 VALUES (?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![g0, g1, name, iso, geom],
         )
         .unwrap();
@@ -65,13 +59,19 @@ fn build_gadm_like() -> PathBuf {
 
 #[test]
 fn reads_filtered_region_with_iso_ids() {
-    let path = build_gadm_like();
-    let q = Source::Gadm { level: 1 }.layer_query();
+    let path = build_admin_layer();
+    let q = LayerQuery {
+        table: Some("admin1".into()),
+        id_columns: vec!["iso".into(), "uid".into()],
+        name_column: "name".into(),
+        filter_column: Some("country".into()),
+        class: "subdivision".into(),
+    };
 
     let fr = read_layer(&path, &q, Some("FRA")).unwrap();
     let ids: Vec<&str> = fr.iter().map(|f| f.id.as_str()).collect();
-    // ISO_1 is used when present; "NA" falls back to GID_1.
-    assert_eq!(ids, ["FR-IDF", "FRA.5_1"]);
+    // The ISO code is used when present; "NA" falls back to the next id column.
+    assert_eq!(ids, ["FR-IDF", "fr-05"]);
     assert_eq!(fr[0].name, "Île-de-France");
     assert_eq!(fr[0].geometry.0.len(), 1);
 

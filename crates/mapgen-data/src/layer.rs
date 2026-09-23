@@ -25,8 +25,8 @@ pub struct LayerQuery {
 /// Well-known layouts of the supported datasets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
-    /// GADM 4.1 "levels" GeoPackage (`gadm_410-levels.gpkg`), layers `ADM_0`..`ADM_5`.
-    Gadm { level: u8 },
+    /// geoBoundaries gbOpen GeoJSON (one file per country and level).
+    GeoBoundaries,
     /// Natural Earth 1:10m Admin-0 countries.
     NaturalEarthAdmin0,
     /// Natural Earth 1:10m Admin-1 states, provinces, départements...
@@ -47,28 +47,17 @@ impl Source {
             }
         };
         match *self {
-            Source::Gadm { level: 0 } => q(
-                "ADM_0".into(),
-                &["GID_0"],
-                "COUNTRY",
-                Some("GID_0"),
-                "country",
-            ),
-            // GADM 4.1 carries ISO 3166-2 codes at level 1 only.
-            Source::Gadm { level: 1 } => q(
-                "ADM_1".into(),
-                &["ISO_1", "GID_1"],
-                "NAME_1",
-                Some("GID_0"),
-                "subdivision",
-            ),
-            Source::Gadm { level } => q(
-                format!("ADM_{level}"),
-                &[&format!("GID_{level}")],
-                &format!("NAME_{level}"),
-                Some("GID_0"),
-                "subdivision",
-            ),
+            // `shapeISO` is only filled for some layers; `shapeID` is always set.
+            Source::GeoBoundaries => LayerQuery {
+                table: None,
+                ..q(
+                    String::new(),
+                    &["shapeISO", "shapeID"],
+                    "shapeName",
+                    Some("shapeGroup"),
+                    "subdivision",
+                )
+            },
             Source::NaturalEarthAdmin0 => q(
                 "ne_10m_admin_0_countries".into(),
                 &["ADM0_A3"],
@@ -156,7 +145,7 @@ pub fn read_grouped(path: &Path, query: &LayerQuery) -> Result<BTreeMap<String, 
     Ok(groups)
 }
 
-/// `NA` and blank values count as missing, as in GADM.
+/// Blank values and common "no data" markers (`NA`, `-99`) count as missing.
 pub(crate) fn meaningful(v: Option<String>) -> Option<String> {
     v.map(|s| s.trim().to_owned())
         .filter(|s| !s.is_empty() && s != "NA" && s != "-99")

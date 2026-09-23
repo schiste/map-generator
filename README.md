@@ -4,6 +4,9 @@ A deterministic pipeline that turns authoritative GIS boundary data into clean,
 lightweight, restylable SVG maps of the world, continents, countries, and their
 subdivisions. The default style follows Wikimedia Commons location maps.
 
+**Open data only.** Every supported source is public domain or openly licensed,
+and each map records its data credit.
+
 ![France, départements](docs/examples/france-departements.svg)
 
 ```sh
@@ -37,6 +40,7 @@ Each region is its own selectable element:
 | --- | --- |
 | ![Europe](docs/examples/europe.svg) | ![Japan, light theme](docs/examples/japan-light.svg) |
 | ![World, dark theme](docs/examples/world-dark.svg) | ![Fiji](docs/examples/fiji.svg) |
+| ![France, régions (IGN via geoBoundaries)](docs/examples/france-regions.svg) | ![US counties (Census Bureau, public domain)](docs/examples/usa-counties.svg) |
 
 Open [`docs/examples/france-departements.html`](docs/examples/france-departements.html)
 locally for the interactive colour editor. Regenerate everything with `scripts/build-examples.sh`.
@@ -72,8 +76,9 @@ With `--css-vars`, an SVG inlined in a web page can be recoloured from CSS:
 ## CLI
 
 ```sh
-# A country's subdivisions (GADM levels 0–5, or Natural Earth Admin-1)
-mapgen render -i data/gadm_410-levels.gpkg --dataset gadm --level 2 --region ITA -o italy-provinces.svg
+# Finer subdivisions from geoBoundaries (ADM1–ADM5, one file per country and level)
+scripts/fetch-data.sh geoboundaries ITA ADM2
+mapgen render -i data/geoboundaries/ITA-ADM2.geojson --dataset geoboundaries --credit -o italy-provinces.svg
 
 # A continent, a custom box, or the world
 mapgen render -i data/ne_10m_admin_0.geojson --dataset ne-admin0 --continent Europe -o europe.svg
@@ -88,7 +93,8 @@ mapgen render -i my.geojson --id-column code --name-column label -o mine.svg
 ```
 
 Other useful flags include `--width`, `--padding`, `--simplify` (px), `--min-area` (px²), `--margin`,
-`--frame auto|all|world`, `--projection auto|laea|equal-earth`, and `--name-column name_fr` (Natural Earth ships names in about 40 languages).
+`--frame auto|all|world`, `--projection auto|laea|equal-earth`, `--name-column name_fr` (Natural Earth ships names in about 40 languages),
+and `--attribution` / `--credit` for the data credit.
 Run `mapgen render --help` for the full list.
 
 ## Architecture
@@ -96,7 +102,7 @@ Run `mapgen render --help` for the full list.
 | Crate | Role |
 | --- | --- |
 | [`mapgen-core`](crates/mapgen-core) | Pure pipeline, no I/O: framing, projection, antimeridian, simplification, clipping, SVG/HTML. |
-| [`mapgen-data`](crates/mapgen-data) | Readers for GADM / Natural Earth / any GeoPackage or GeoJSON layer. |
+| [`mapgen-data`](crates/mapgen-data) | Readers for Natural Earth, geoBoundaries, and any GeoPackage or GeoJSON layer. |
 | [`mapgen-cli`](crates/mapgen-cli) | The `mapgen` binary. |
 
 ```
@@ -108,24 +114,29 @@ See [docs/architecture.md](docs/architecture.md).
 
 ## Data and licensing
 
-The **code** is MIT-licensed. **Maps you generate carry the licence of the data
-they were built from**:
+The **code** is MIT-licensed. The project only supports **open data**; each map
+carries the credit for its data in a `<desc id="attribution">` element, and `--credit`
+also prints it on the map.
 
-| Dataset | Licence | Notes |
+| Dataset | Levels | Licence |
 | --- | --- | --- |
-| [Natural Earth](https://www.naturalearthdata.com/) | Public domain | Safe for any use. All examples here use it. |
-| [GADM 4.1](https://gadm.org/license.html) | Free for non-commercial use; redistribution not allowed without permission | Do not publish GADM-derived maps commercially. |
+| [Natural Earth](https://www.naturalearthdata.com/) | Countries, first-level subdivisions, lakes | Public domain |
+| [geoBoundaries](https://www.geoboundaries.org/) (`gbOpen` release only) | ADM0–ADM5, per country | Open, varies by country: public domain, CC BY, CC BY-SA, ODbL, national open licences |
 
-No dataset is vendored in this repository. See [docs/data-sources.md](docs/data-sources.md).
+geoBoundaries licences come from each country's source, so `scripts/fetch-data.sh`
+saves a `.license.json` next to every file. `mapgen` reads it to build the credit and
+warns when a licence is share-alike (the resulting maps must then be shared under the
+same licence). No dataset is vendored in this repository. See
+[docs/data-sources.md](docs/data-sources.md).
 
 ## Known limitations and roadmap
 
 - [ ] Borders drawn as a separate mesh, so each border is stroked once. Today each region strokes its own outline, which also draws Natural Earth's 180° cut through Taveuni (Fiji).
-- [ ] Rivers and coastlines from OpenStreetMap, labels and translations from GeoNames
+- [ ] Rivers and coastlines from OpenStreetMap (ODbL), label points from GeoNames (CC BY)
 - [ ] Smarter label placement (pole of inaccessibility, leader lines). Today labels that collide or don't fit are dropped.
 - [ ] Insets for overseas territories (today they're reported and left out, or included with `--frame all`)
 - [ ] Optional `proj` backend for explicit EPSG codes
-- [ ] GADM output tested end to end on the full dataset (the reader is covered by a synthetic GeoPackage test)
+- [ ] `mapgen batch` across many geoBoundaries files (today: one input file per run)
 
 ## Contributing
 

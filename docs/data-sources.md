@@ -1,26 +1,45 @@
 # Data sources
 
-`scripts/fetch-data.sh` downloads datasets into `./data`, which is git-ignored.
+This project only supports **public-domain or openly licensed** data. Datasets
+with non-commercial or no-redistribution terms (such as GADM) are deliberately
+not supported.
+
+Downloads go to `./data`, which is git-ignored. Nothing is vendored.
 
 ## Natural Earth (public domain)
 
-- Quickest: `scripts/fetch-data.sh ne-geojson` gets Admin-0, Admin-1 and lakes as GeoJSON (~56 MB).
-- Full: `natural_earth_vector.gpkg` (all themes, all scales)
-- Layers used: `ne_10m_admin_0_countries` (filter `ADM0_A3`),
-  `ne_10m_admin_1_states_provinces` (filter `adm0_a3`, id `iso_3166_2`)
-- Lakes: `ne_10m_lakes` (use with `--lakes`); countries as context: Admin-0 (use with `--context`).
-- Names in ~40 languages: `--name-column name_fr`, `name_de`, `name_ja`…
-- Good for world and continent views, and for Admin-1 maps that already have ISO 3166-2 ids.
+- Quickest: `scripts/fetch-data.sh ne-geojson` fetches Admin-0, Admin-1 and lakes as GeoJSON (~56 MB).
+- Full: `scripts/fetch-data.sh natural-earth` fetches `natural_earth_vector.gpkg` (all themes, all scales).
+- Layers used: `ne_10m_admin_0_countries` (filter `ADM0_A3`), `ne_10m_admin_1_states_provinces`
+  (filter `adm0_a3`, id `iso_3166_2`), `ne_10m_lakes`.
+- Names in about 40 languages: `--name-column name_fr`, `name_de`, `name_ja`…
+- Credit: "Natural Earth" (not required, but added automatically).
 
-## GADM 4.1 (non-commercial)
+## geoBoundaries `gbOpen` (open; licence varies by country)
 
-- File: `gadm_410-levels.gpkg`, with layers `ADM_0` … `ADM_5`
-- Filter column `GID_0` (ISO 3166-1 alpha-3), id `GID_n` (level 1 prefers `ISO_1`, the ISO 3166-2 code), name `NAME_n`
-- **Licence:** free for academic and other non-commercial use. Redistribution
-  or commercial use requires permission from GADM. Maps generated from GADM
-  inherit this restriction regardless of this project's MIT licence.
+- `scripts/fetch-data.sh geoboundaries FRA ADM2` downloads one country and level; `FRA,DEU` or `ALL`
+  downloads several. Add `--simplified` for geoBoundaries' lighter geometry.
+- Files: `data/geoboundaries/<ISO3>-<LEVEL>.geojson` plus `<ISO3>-<LEVEL>.license.json` with the
+  licence, original source, and source URL, taken from the geoBoundaries API.
+- Properties: `shapeName` (name), `shapeISO` (ISO 3166-2, often empty below ADM1), `shapeID`
+  (stable id, used as fallback), `shapeGroup` (ISO3).
+- Only the `gbOpen` release is used. geoBoundaries' other releases (`gbHumanitarian`,
+  `gbAuthoritative`) can carry non-open terms.
+
+Licences seen in practice:
+
+| Example | Licence | Obligation |
+| --- | --- | --- |
+| USA ADM2 (Census Bureau) | Public domain | None |
+| CHN ADM2 | ODC PDDL | None |
+| FRA ADM1/ADM2 (IGN) | Etalab Open License 2.0 | Attribution |
+| DEU ADM3 (BKG) | Data licence Germany – Attribution 2.0 | Attribution |
+| AUT ADM2 (BEV) | CC BY-SA 2.0 | Attribution + share-alike |
+
+`mapgen` embeds the credit in every SVG and warns on share-alike licences.
+Check the `.license.json` before publishing.
 
 ## Planned
 
-- **OpenStreetMap / Geofabrik** (ODbL): fine coastlines, rivers.
+- **OpenStreetMap / Geofabrik** (ODbL): fine coastlines and rivers.
 - **GeoNames** (CC BY 4.0): label anchor points.

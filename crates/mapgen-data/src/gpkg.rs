@@ -160,9 +160,9 @@ mod tests {
     }
 
     #[test]
-    fn gadm_level_layout() {
-        let q = Source::Gadm { level: 2 }.layer_query();
-        assert_eq!(q.table.as_deref(), Some("ADM_2"));
-        assert_eq!(q.id_columns, vec!["GID_2".to_string()]);
+    fn natural_earth_layout() {
+        let q = Source::NaturalEarthAdmin1.layer_query();
+        assert_eq!(q.table.as_deref(), Some("ne_10m_admin_1_states_provinces"));
+        assert_eq!(q.filter_column.as_deref(), Some("adm0_a3"));
     }
 }

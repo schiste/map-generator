@@ -509,6 +509,8 @@ dependencies = [
  "mapgen-core",
  "mapgen-data",
  "rayon",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

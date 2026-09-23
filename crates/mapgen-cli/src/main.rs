@@ -32,8 +32,8 @@ enum Command {
 enum Dataset {
     /// Any layer; set --table (GeoPackage) and --id-column/--name-column as needed.
     Custom,
-    /// GADM 4.1 levels GeoPackage (use --level).
-    Gadm,
+    /// geoBoundaries gbOpen GeoJSON (see `scripts/fetch-data.sh geoboundaries`).
+    Geoboundaries,
     /// Natural Earth 1:10m Admin-0 (countries).
     NeAdmin0,
     /// Natural Earth 1:10m Admin-1 (states, provinces, départements).
@@ -49,10 +49,6 @@ struct InputArgs {
     /// Layout of the input file.
     #[arg(long, value_enum, default_value = "custom")]
     dataset: Dataset,
-
-    /// GADM administrative level (0 = countries, 1 = states, 2 = counties...).
-    #[arg(long, default_value_t = 1)]
-    level: u8,
 
     /// GeoPackage table (overrides the dataset preset).
     #[arg(long)]
@@ -77,6 +73,15 @@ struct InputArgs {
     /// Lakes: Natural Earth lakes (.gpkg or .geojson).
     #[arg(long)]
     lakes: Option<PathBuf>,
+
+    /// Data credit embedded in the SVG. Default: built from the inputs
+    /// (`<file>.license.json` next to a data file, or Natural Earth).
+    #[arg(long)]
+    attribution: Option<String>,
+
+    /// Also draw the data credit in the bottom-right corner.
+    #[arg(long)]
+    credit: bool,
 }
 
 impl InputArgs {
@@ -89,7 +94,7 @@ impl InputArgs {
                 filter_column: None,
                 class: "region".into(),
             },
-            Dataset::Gadm => Source::Gadm { level: self.level }.layer_query(),
+            Dataset::Geoboundaries => Source::GeoBoundaries.layer_query(),
             Dataset::NeAdmin0 => Source::NaturalEarthAdmin0.layer_query(),
             Dataset::NeAdmin1 => Source::NaturalEarthAdmin1.layer_query(),
         };
@@ -106,6 +111,40 @@ impl InputArgs {
             q.filter_column = Some(c.clone());
         }
         q
+    }
+
+    /// Credits for every input, and whether any licence is share-alike.
+    fn attribution(&self) -> (Option<String>, bool) {
+        if let Some(a) = &self.attribution {
+            return (Some(a.clone()), false);
+        }
+        let mut credits: Vec<String> = Vec::new();
+        let mut share_alike = false;
+        let inputs = [
+            Some(&self.input),
+            self.context.as_ref(),
+            self.lakes.as_ref(),
+        ];
+        for (i, path) in inputs.into_iter().enumerate() {
+            let Some(path) = path else { continue };
+            let credit = match read_license(path) {
+                Some(l) => {
+                    share_alike |= l.share_alike();
+                    l.credit()
+                }
+                None if i > 0 || matches!(self.dataset, Dataset::NeAdmin0 | Dataset::NeAdmin1) => {
+                    "Natural Earth".to_owned()
+                }
+                None => continue,
+            };
+            if !credits.contains(&credit) {
+                credits.push(credit);
+            }
+        }
+        (
+            (!credits.is_empty()).then(|| credits.join("; ")),
+            share_alike,
+        )
     }
 
     fn load_context(&self) -> Result<(Vec<MapFeature>, Vec<MapFeature>)> {
@@ -300,6 +339,7 @@ fn main() -> Result<()> {
 }
 
 fn options(
+    input: &InputArgs,
     style: &StyleArgs,
     layout: &LayoutArgs,
     title: Option<String>,
@@ -316,6 +356,8 @@ fn options(
         padding: layout.padding,
         precision: layout.precision,
         title,
+        attribution: input.attribution().0,
+        credit: input.credit,
         theme: style.theme(),
         css_vars: style.css_vars || html,
         labels: style.labels,
@@ -385,7 +427,7 @@ fn run_render(args: RenderArgs) -> Result<()> {
     let context = context_for(&context, &subject, region.as_deref());
 
     let html = is_html(args.format, &args.out);
-    let opts = options(&args.style, &layout, args.title.clone(), html)?;
+    let opts = options(&args.input, &args.style, &layout, args.title.clone(), html)?;
     let layers = MapLayers {
         subject,
         context,
@@ -408,11 +450,25 @@ fn run_render(args: RenderArgs) -> Result<()> {
         body.len(),
         rendered.projection,
     );
+    report_license(&args.input);
     if !rendered.outside_frame.is_empty() {
+        let names: Vec<&str> = rendered
+            .outside_frame
+            .iter()
+            .map(|id| {
+                layers
+                    .subject
+                    .iter()
+                    .find(|f| &f.id == id)
+                    .map_or(id.as_str(), |f| f.name.as_str())
+            })
+            .collect();
+        let shown = names.iter().take(8).copied().collect::<Vec<_>>().join(", ");
+        let more = names.len().saturating_sub(8);
         eprintln!(
-            "note: {} region(s) outside the frame were left out: {} (use --frame all to include them)",
-            rendered.outside_frame.len(),
-            rendered.outside_frame.join(", ")
+            "note: {} region(s) outside the frame were left out: {shown}{} (use --frame all to include them)",
+            names.len(),
+            if more > 0 { format!(" and {more} more") } else { String::new() },
         );
     }
     Ok(())
@@ -457,7 +513,13 @@ fn run_batch(args: BatchArgs) -> Result<()> {
                     lakes: lakes.clone(),
                     subject,
                 };
-                let opts = options(&args.style, &args.layout, Some(code.clone()), html)?;
+                let opts = options(
+                    &args.input,
+                    &args.style,
+                    &args.layout,
+                    Some(code.clone()),
+                    html,
+                )?;
                 let rendered = render(&layers, &opts)?;
                 let out = args.out_dir.join(format!("{}.{ext}", file_safe(code)));
                 let body = if html {
@@ -490,6 +552,49 @@ fn run_batch(args: BatchArgs) -> Result<()> {
     Ok(())
 }
 
+/// Licence metadata written by `scripts/fetch-data.sh` next to a data file.
+#[derive(serde::Deserialize)]
+struct LicenseFile {
+    license: String,
+    source: String,
+    #[serde(default)]
+    via: Option<String>,
+}
+
+impl LicenseFile {
+    fn credit(&self) -> String {
+        match &self.via {
+            Some(via) => format!("{} ({}) via {via}", self.source, self.license),
+            None => format!("{} ({})", self.source, self.license),
+        }
+    }
+
+    fn share_alike(&self) -> bool {
+        let l = self.license.to_ascii_lowercase();
+        l.contains("sharealike")
+            || l.contains("share-alike")
+            || l.contains("by-sa")
+            || l.contains("odbl")
+    }
+}
+
+fn read_license(data: &Path) -> Option<LicenseFile> {
+    let text = std::fs::read_to_string(data.with_extension("license.json")).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+fn report_license(input: &InputArgs) {
+    let (attribution, share_alike) = input.attribution();
+    if let Some(a) = attribution {
+        eprintln!("attribution: {a}");
+    }
+    if share_alike {
+        eprintln!(
+            "note: share-alike data licence; maps made from it must be shared under the same licence"
+        );
+    }
+}
+
 fn file_safe(code: &str) -> String {
     code.chars()
         .map(|c| {
@@ -513,5 +618,35 @@ fn print_themes() {
     println!("\nframe presets (--bbox):");
     for (name, b) in BBOX_PRESETS {
         println!("  {name:<14} {},{},{},{}", b.west, b.south, b.east, b.north);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn license(l: &str) -> LicenseFile {
+        LicenseFile {
+            license: l.into(),
+            source: "Src".into(),
+            via: Some("geoBoundaries".into()),
+        }
+    }
+
+    #[test]
+    fn detects_share_alike_licences() {
+        assert!(license("Creative Commons Attribution-ShareAlike 2.0").share_alike());
+        assert!(license("CC BY-SA 4.0").share_alike());
+        assert!(license("Open Database License (ODbL) v1.0").share_alike());
+        assert!(!license("Public Domain").share_alike());
+        assert!(!license("Etalab Open License 2.0").share_alike());
+    }
+
+    #[test]
+    fn credit_names_source_licence_and_distributor() {
+        assert_eq!(
+            license("Public Domain").credit(),
+            "Src (Public Domain) via geoBoundaries"
+        );
     }
 }

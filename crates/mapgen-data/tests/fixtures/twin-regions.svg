@@ -9,6 +9,7 @@ path{stroke-linejoin:round;fill-rule:evenodd}
 .mg-land{fill:#fefee9;stroke:#646464;stroke-width:0.5}
 .mg-lake{fill:#c6ecff;stroke:#0978ab;stroke-width:0.4}
 .mg-label{fill:#333333;font:11px sans-serif;text-anchor:middle;dominant-baseline:central;paint-order:stroke;stroke:#fefee9;stroke-width:2.5px;stroke-linejoin:round}
+.mg-credit{fill:#333333;font:9px sans-serif;text-anchor:end;opacity:.75}
 </style>
 <rect id="background" class="mg-background" width="400" height="352"/>
 <path id="water" class="mg-water" d="M400 351.3L400 0L0 0L0 351.3Z"/>

@@ -11,7 +11,7 @@
 //! 4. stitch rings back together from the simplified arcs.
 //!
 //! This relies on neighbours sharing bit-identical vertices, which holds for
-//! Natural Earth and GADM (and is preserved by deterministic projection).
+//! Natural Earth and geoBoundaries (and is preserved by deterministic projection).
 
 use std::collections::HashMap;
 

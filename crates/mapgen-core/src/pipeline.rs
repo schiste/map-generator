@@ -33,6 +33,10 @@ pub struct RenderOptions {
     /// Decimal places kept for path coordinates.
     pub precision: usize,
     pub title: Option<String>,
+    /// Data credit, e.g. "Natural Earth; IGN (Etalab Open License 2.0) via
+    /// geoBoundaries". Always embedded as `<desc>`; drawn when `credit` is set.
+    pub attribution: Option<String>,
+    pub credit: bool,
     pub theme: Theme,
     /// Emit `var(--mg-*, …)` colours for restyling from page CSS.
     pub css_vars: bool,
@@ -57,6 +61,8 @@ impl Default for RenderOptions {
             padding: 0,
             precision: 1,
             title: None,
+            attribution: None,
+            credit: false,
             theme: Theme::default(),
             css_vars: false,
             labels: false,
@@ -199,6 +205,8 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
         labels: opts.labels,
         theme: &opts.theme,
         title: opts.title.as_deref(),
+        attribution: opts.attribution.as_deref(),
+        credit: opts.credit,
         precision: opts.precision,
         css_vars: opts.css_vars,
     });

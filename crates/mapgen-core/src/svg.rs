@@ -39,6 +39,10 @@ pub struct SvgDocument<'a> {
     pub labels: bool,
     pub theme: &'a Theme,
     pub title: Option<&'a str>,
+    /// Data credit, embedded as `<desc>` (and drawn if `credit` is set).
+    pub attribution: Option<&'a str>,
+    /// Draw the attribution in the bottom-right corner.
+    pub credit: bool,
     /// Decimal places kept for coordinates.
     pub precision: usize,
     /// Emit colours as `var(--mg-<slot>, <colour>)` so a page embedding the
@@ -64,6 +68,13 @@ pub fn write_svg(doc: &SvgDocument) -> String {
     );
     if let Some(title) = doc.title {
         let _ = writeln!(out, "<title>{}</title>", escape(title));
+    }
+    if let Some(attribution) = doc.attribution {
+        let _ = writeln!(
+            out,
+            "<desc id=\"attribution\">{}</desc>",
+            escape(attribution)
+        );
     }
     let _ = writeln!(
         out,
@@ -104,6 +115,15 @@ pub fn write_svg(doc: &SvgDocument) -> String {
     if doc.labels {
         write_labels(&mut out, doc.subject, vp, doc.theme.label_size);
     }
+    if let (true, Some(attribution)) = (doc.credit, doc.attribution) {
+        let _ = writeln!(
+            out,
+            "<text id=\"credit\" class=\"mg-credit\" x=\"{}\" y=\"{}\">{}</text>",
+            w.saturating_sub(4),
+            h.saturating_sub(4),
+            escape(attribution)
+        );
+    }
     out.push_str("</svg>\n");
     out
 }
@@ -134,7 +154,8 @@ pub fn stylesheet(theme: &Theme, css_vars: bool) -> String {
          .mg-land{{fill:{land};stroke:{border};stroke-width:{bw}}}\n\
          .mg-lake{{fill:{water};stroke:{lakeb};stroke-width:{cbw}}}\n\
          .mg-label{{fill:{label};font:{ls}px sans-serif;text-anchor:middle;dominant-baseline:central;\
-         paint-order:stroke;stroke:{land};stroke-width:2.5px;stroke-linejoin:round}}\n",
+         paint-order:stroke;stroke:{land};stroke-width:2.5px;stroke-linejoin:round}}\n\
+         .mg-credit{{fill:{label};font:9px sans-serif;text-anchor:end;opacity:.75}}\n",
         bg = c("background"),
         water = c("water"),
         ctx = c("context-land"),
