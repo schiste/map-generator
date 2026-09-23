@@ -22,6 +22,8 @@ use mapgen_data::{
 };
 use rayon::prelude::*;
 
+mod join;
+
 /// Deterministic SVG map generator.
 #[derive(Parser)]
 #[command(name = "mapgen", version, about)]
@@ -44,6 +46,15 @@ enum Command {
     /// Check a layer for invalid polygons, slivers, overlaps, near-miss
     /// borders and duplicate ids.
     Check(CheckArgs),
+    /// Compare the codes of a data table with a map's regions: codes the map
+    /// lacks usually mean data and boundaries from different years.
+    Match(join::MatchArgs),
+    /// Build a crosswalk between two versions of a layer, weighted by area
+    /// overlap.
+    Crosswalk(join::CrosswalkArgs),
+    /// Move a data table from old codes to new ones through a crosswalk:
+    /// renames and merges are automatic, splits need weights.
+    Reshape(join::ReshapeArgs),
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -59,7 +70,7 @@ enum Dataset {
 }
 
 #[derive(clap::Args)]
-struct InputArgs {
+pub(crate) struct InputArgs {
     /// Layout of the input file(s).
     #[arg(long, value_enum, default_value = "custom")]
     dataset: Dataset,
@@ -160,7 +171,7 @@ struct InputArgs {
 }
 
 impl InputArgs {
-    fn query(&self) -> LayerQuery {
+    pub(crate) fn query(&self) -> LayerQuery {
         let mut q = match self.dataset {
             Dataset::Custom => LayerQuery {
                 table: None,
@@ -721,6 +732,9 @@ fn main() -> Result<()> {
         }
         Command::Convert(args) => run_convert(args),
         Command::Check(args) => run_check(args),
+        Command::Match(args) => join::run_match(args),
+        Command::Crosswalk(args) => join::run_crosswalk(args),
+        Command::Reshape(args) => join::run_reshape(args),
     }
 }
 

@@ -90,6 +90,25 @@ county's tooltip ("Lancaster, Nebraska").
 Natural Earth Admin-1 works the same way for ISO 3166-2 codes (`--ids-column iso_3166_2`,
 or `region_cod` to get e.g. French régions).
 
+## Crosswalks between boundary versions
+
+`mapgen reshape` reads any table with an old code, a new code and an optional weight (the
+share of the old region's value that goes to the new one). Published ones are better than
+the area weights of `mapgen crosswalk`, which assume values are spread evenly:
+
+- **US counties.** The Census Bureau lists [substantial county changes](https://www.census.gov/programs-surveys/geography/technical-documentation/county-changes.html)
+  by decade (e.g. Valdez-Cordova, 02261, split into 02063 and 02066 in 2019; Connecticut's
+  counties replaced by planning regions in 2022), and publishes
+  [relationship files](https://www.census.gov/geographies/reference-files/time-series/geo/relationship-files.html)
+  with the land area and population of each old/new overlap, from which weights are one
+  division away. Public domain.
+- **EU regions.** Eurostat publishes [NUTS history](https://ec.europa.eu/eurostat/web/nuts/history)
+  tables between successive NUTS versions (2016 → 2021 → 2024), with the changes typed as
+  code changes, boundary shifts, merges and splits. Reuse is allowed with attribution.
+
+Values are added up and shared out, so reshape counts (people, votes, businesses), not
+rates, shares or medians: recompute those from reshaped counts.
+
 ## Planned
 
 - **OpenStreetMap / Geofabrik** (ODbL): fine coastlines and rivers.

@@ -13,6 +13,7 @@ pub mod gpkg;
 #[cfg(feature = "gpkg")]
 pub mod gpkg_write;
 pub mod iso;
+pub mod join;
 mod layer;
 pub mod table;
 

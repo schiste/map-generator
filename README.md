@@ -39,7 +39,7 @@ colour the map by country, neighbours included.
 - **Labels that fit.** Placed at each region's visual centre, shrunk to fit, curved along long thin shapes (Chile), or outside small regions with a leader line where that covers no other region.
 - **Two datasets, one border.** Neighbouring countries from one dataset are snapped onto the outline of regions from another, closing gaps and doubled borders.
 - **Easy restyling.** Four themes plus a flag for every colour. Colours live in one `<style>` block, can be emitted as CSS custom properties, and `.html` output adds live colour pickers.
-- **Data tools.** `mapgen convert` writes indexed GeoPackages (3–4× faster renders) and borrows readable ids (ISO 3166-2, FIPS) by spatial overlap; `mapgen check` finds invalid polygons, slivers, overlaps and near-miss borders, and `--repair` fixes what it safely can.
+- **Data tools.** `mapgen convert` writes indexed GeoPackages (3–4× faster renders) and borrows readable ids (ISO 3166-2, FIPS) by spatial overlap; `mapgen check` finds invalid polygons, slivers, overlaps and near-miss borders, and `--repair` fixes what it safely can. `mapgen match` reports data codes a map lacks (usually data and boundaries from different years), and `mapgen reshape` moves data to new codes through a crosswalk: renames and merges automatically, splits by weight, and anything ambiguous listed for a decision.
 
 ## Gallery
 
@@ -123,6 +123,13 @@ mapgen render … --units units.csv --dissolve
 scripts/fetch-data.sh ne-worldview IND
 mapgen render … --context data/ne_10m_admin_0.geojson --worldview IND \
     --disputed-areas data/ne_10m_disputed_areas.geojson     # credit: "Natural Earth (IND view)"
+
+# Data from another boundary year: find the mismatches, then move the data to the
+# map's codes. Codes missing from the crosswalk are kept as they are (--complete to
+# refuse); splits without weights are written to out.conflicts.csv and stop the run.
+mapgen match --data data.csv --code-column fips --code-prefix US- --map counties.svg --max-missing 0.01
+mapgen crosswalk --from counties-2010.geojson --to counties-2020.geojson -o cw.csv   # area weights
+mapgen reshape --data data.csv --code-column fips --crosswalk cw.csv --weight-column weight -o out.csv
 
 # Check and repair input data
 mapgen check -i data/geoboundaries/AUT-ADM2.geojson --dataset geoboundaries
