@@ -152,7 +152,8 @@ test("parity: South America (curved label along Chile)", { skip: skipUnless(hasN
     width: 700,
     title: "South America",
   });
-  assert.match(out.svg, /<textPath href="#label-path-CHL"/);
+  // Commons target (the default): rotated letters, since librsvg has no textPath.
+  assert.match(out.svg, /<g class="mg-label" aria-label="Chile"><text transform=/);
   assert.equal(out.svg, read(join(examples, "south-america.svg")));
 });
 
@@ -166,13 +167,59 @@ test("parity: world map (Equal Earth, seam splitting)", { skip: skipUnless(hasNE
   assert.equal(out.svg, read(join(examples, "world-dark.svg")));
 });
 
+test("parity: Japan labelled in four languages", { skip: skipUnless(hasNE) }, () => {
+  const languages = ["ja", "ko", "zh-Hans", "zh-Hant"];
+  const out = withContext(ne.admin1, { dataset: "ne-admin1", languages }).render({
+    region: "JPN",
+    labels: true,
+    languages,
+    theme: "light",
+    width: 700,
+    title: "Japan",
+  });
+  assert.match(out.svg, /<switch>\n<text systemLanguage="zh-Hans,zh-CN,zh-SG,zh-MY"/);
+  assert.equal(out.svg, read(join(examples, "japan-light.svg")));
+});
+
+test("parity: Fiji with CSS custom properties", { skip: skipUnless(hasNE) }, () => {
+  const out = withContext(ne.admin1, { dataset: "ne-admin1" }).render({
+    region: "FJI",
+    cssVars: true,
+    width: 500,
+    title: "Fiji (straddles 180°)",
+  });
+  assert.equal(out.svg, read(join(examples, "fiji.svg")));
+});
+
+const indFile = join(data, "ne_10m_admin_0_ind.geojson");
+const areasFile = join(data, "ne_10m_disputed_areas.geojson");
+test("parity: Kashmir from India's point of view", { skip: skipUnless(hasNE && existsSync(indFile) && existsSync(areasFile)) }, () => {
+  const india = read(indFile);
+  const gen = new MapGenerator();
+  gen.setSubject(india, { dataset: "ne-admin0", worldview: "IND" });
+  gen.setContext(india, { dataset: "ne-admin0", worldview: "IND" });
+  gen.setLakes(ne.lakes);
+  gen.setDisputed(ne.disputed);
+  gen.setDisputedAreas(read(areasFile));
+  const out = gen.render({ bbox: "66,26,84,38", labels: true, width: 600, title: "Kashmir (IND view)" });
+  assert.match(out.svg, /Natural Earth \(IND view\)/);
+  assert.equal(out.svg, read(join(examples, "kashmir-ind.svg")));
+});
+
 const gbFile = join(data, "geoboundaries", "FRA-ADM1.geojson");
 test("parity: France régions (geoBoundaries, credited)", { skip: skipUnless(hasNE && existsSync(gbFile)) }, () => {
   const lic = JSON.parse(read(gbFile.replace(/\.geojson$/, ".license.json")));
   const out = withContext(read(gbFile), {
     dataset: "geoboundaries",
     attribution: `${lic.source} (${lic.license}) via ${lic.via}`,
-  }).render({ labels: true, credit: true, width: 900, title: "France — régions" });
+  }).render({
+    labels: true,
+    credit: true,
+    width: 900,
+    title: "France — régions",
+    boundaryYear: lic.year,
+    sourceRelease: lic.release,
+  });
   // The gallery map is rendered from a GeoPackage made by `mapgen convert
   // --ids-from`, which replaces geoBoundaries' obsolete code for Corsica
   // (FR-20R) with the current one (FR-COR). The id also changes the order of
@@ -181,6 +228,11 @@ test("parity: France régions (geoBoundaries, credited)", { skip: skipUnless(has
   const sortRuns = (line) =>
     line.replace(/ d="([^"]*)"/, (_, d) => ` d="${d.split(/(?=M)/).sort().join("")}"`);
   const lines = (svg) =>
-    svg.replaceAll('id="FR-20R"', 'id="FR-COR"').split("\n").map(sortRuns).sort();
+    svg
+      .replaceAll('id="FR-20R"', 'id="FR-COR"')
+      .replaceAll('data-code="FR-20R"', 'data-code="FR-COR"')
+      .split("\n")
+      .map(sortRuns)
+      .sort();
   assert.deepEqual(lines(out.svg), lines(read(join(examples, "france-regions.svg"))));
 });

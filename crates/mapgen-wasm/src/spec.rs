@@ -592,6 +592,15 @@ impl Sources<'_> {
                 out.push(c);
             }
         }
+        // With a point-of-view file loaded, the other Natural Earth layers
+        // (lakes, disputed areas) are part of that view, as in the CLI.
+        let de_facto = "Natural Earth (de facto view)";
+        if out
+            .iter()
+            .any(|c| c.starts_with("Natural Earth (") && *c != de_facto)
+        {
+            out.retain(|c| *c != de_facto);
+        }
         (!out.is_empty()).then(|| out.join("; "))
     }
 }
@@ -860,6 +869,18 @@ mod tests {
         )
         .unwrap();
         assert!(out.svg.contains("Natural Earth (IND view)"));
+        // ...and the other Natural Earth layers (here lakes) share it.
+        let out = render_map(
+            Sources {
+                context: Some(&india),
+                ..src
+            },
+            &RenderSpec::default(),
+        )
+        .unwrap();
+        assert!(out.svg.contains(
+            r#"<desc id="attribution">IGN (Etalab 2.0); Natural Earth (IND view)</desc>"#
+        ));
         let out = render_map(src, &spec(r#"{"attribution": "Mine"}"#).unwrap()).unwrap();
         assert!(out.svg.contains(">Mine</desc>"));
         // A custom layer without a credit adds none.

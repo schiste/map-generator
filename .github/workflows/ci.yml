@@ -117,6 +117,7 @@ jobs:
         run: |
           scripts/fetch-data.sh ne-geojson
           scripts/fetch-data.sh geoboundaries FRA ADM1
+          scripts/fetch-data.sh ne-worldview IND
       - run: cargo clippy -p mapgen-wasm --target wasm32-unknown-unknown --all-targets
       - name: wasm-bindgen tests (Node)
         working-directory: crates/mapgen-wasm

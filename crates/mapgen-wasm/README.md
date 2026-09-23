@@ -26,7 +26,11 @@ document.body.innerHTML = map.svg; // also: map.width, map.height, map.projectio
   repeatedly (typically 30–200 ms for a country).
 - Options mirror the CLI flags (`RenderSpec` in the TypeScript definitions).
   Unknown or misspelled options are errors, not silently ignored.
-- `format: "html"` also returns an interactive page with colour pickers.
+- `format: "html"` also returns an interactive page with colour pickers (and
+  `textPath` curved labels; SVG output defaults to `target: "commons"`, rotated
+  letters that Wikimedia's renderer can draw).
+- Multilingual labels: read names with `setSubject(text, { languages: ["fr", "zh-Hant"] })`,
+  then `render({ labels: true, languages: ["fr", "zh-Hant"] })`.
 - `themes()`, `bboxPresets()` and `version()` expose the built-in tables.
 - GeoPackage input is not available in WebAssembly (it needs SQLite); use GeoJSON.
 
@@ -44,5 +48,5 @@ npm run serve               # playground at http://localhost:8080 (after build:w
 
 The parity tests re-render the repository's example gallery in WebAssembly and
 compare it byte for byte with the native output. They need the datasets
-(`scripts/fetch-data.sh ne-geojson` and `geoboundaries FRA ADM1` from the repo
-root) and are skipped without them, unless `MAPGEN_REQUIRE_DATA=1`.
+(`scripts/fetch-data.sh ne-geojson`, `geoboundaries FRA ADM1` and `ne-worldview IND`
+from the repo root) and are skipped without them, unless `MAPGEN_REQUIRE_DATA=1`.
