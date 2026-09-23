@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 
 use geo::{Area, SimplifyVw};
-use geo_types::{Coord, LineString, MultiPolygon, Polygon};
+use geo_types::{Coord, Line, LineString, MultiPolygon, Polygon};
 
 /// Converts a tolerance in output pixels into a Visvalingam–Whyatt area
 /// threshold in projected units² (VW removes vertices whose effective
@@ -36,6 +36,189 @@ fn key(c: Coord<f64>) -> Key {
 /// Ring as a closed sequence of arc references `(arc index, reversed)`.
 type RingArcs = Vec<(usize, bool)>;
 
+/// A border arc between two geometries, or on the outline of one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BorderArc {
+    pub coords: Vec<Coord<f64>>,
+    /// Index of a geometry using the arc.
+    pub a: usize,
+    /// The geometry on the other side, or `None` when the arc is on the
+    /// outline of the set (a coast, or the edge of the mapped area).
+    pub b: Option<usize>,
+}
+
+/// Shared-border structure of a set of polygonal geometries.
+///
+/// Rings are cut into arcs at junctions and every arc is stored once, so a
+/// border between two regions is simplified, moved (snapping) and drawn
+/// exactly once. Arcs used twice by the *same* geometry (e.g. the edge where
+/// a dataset cut an island at 180°) are internal to it and never drawn.
+#[derive(Debug, Clone)]
+pub struct Topology {
+    arcs: Vec<Vec<Coord<f64>>>,
+    /// geometry → polygon → ring (exterior first) → arcs, `None` if degenerate.
+    plans: Vec<Vec<Vec<Option<RingArcs>>>>,
+    originals: Vec<MultiPolygon<f64>>,
+}
+
+impl Topology {
+    pub fn build(geoms: &[MultiPolygon<f64>]) -> Topology {
+        // Open, de-duplicated rings: geoms → polygons → rings → vertices.
+        let rings: Vec<Vec<Vec<Vec<Coord<f64>>>>> = geoms
+            .iter()
+            .map(|mp| {
+                mp.0.iter()
+                    .map(|p| {
+                        std::iter::once(p.exterior())
+                            .chain(p.interiors())
+                            .map(open_ring)
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect();
+        let junctions = find_junctions(rings.iter().flatten().flatten());
+        let mut arcs: Vec<Vec<Coord<f64>>> = Vec::new();
+        let mut index: HashMap<Vec<Key>, usize> = HashMap::new();
+        let plans = rings
+            .iter()
+            .map(|g| {
+                g.iter()
+                    .map(|p| {
+                        p.iter()
+                            .map(|r| cut_ring(r, &junctions, &mut arcs, &mut index))
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect();
+        Topology {
+            arcs,
+            plans,
+            originals: geoms.to_vec(),
+        }
+    }
+
+    /// Simplifies every arc once with Visvalingam–Whyatt (endpoints kept).
+    pub fn simplify(&mut self, epsilon: f64) {
+        if epsilon <= 0.0 {
+            return;
+        }
+        for a in &mut self.arcs {
+            *a = LineString(std::mem::take(a)).simplify_vw(&epsilon).0;
+        }
+    }
+
+    /// Applies `f` to every arc vertex. Shared vertices move together, so
+    /// borders stay shared.
+    pub fn map_vertices(&mut self, mut f: impl FnMut(Coord<f64>) -> Coord<f64>) {
+        for a in &mut self.arcs {
+            for c in a.iter_mut() {
+                *c = f(*c);
+            }
+        }
+    }
+
+    /// Segments of the arcs on the outline of the set (used by exactly one
+    /// ring), e.g. to snap another layer's borders onto it.
+    pub fn outline_segments(&self) -> Vec<Line<f64>> {
+        let mut count = vec![0usize; self.arcs.len()];
+        for refs in self.plans.iter().flatten().flatten().flatten() {
+            for &(arc, _) in refs {
+                count[arc] += 1;
+            }
+        }
+        self.arcs
+            .iter()
+            .zip(count)
+            .filter(|(_, n)| *n == 1)
+            .flat_map(|(a, _)| a.windows(2).map(|w| Line::new(w[0], w[1])))
+            .collect()
+    }
+
+    /// Stitches the geometries back together.
+    ///
+    /// Polygons smaller than `min_area` are dropped, except the largest part
+    /// of geometries for which `keep_largest(index)` is true. A geometry whose
+    /// polygons all collapse keeps its largest original polygon unsimplified.
+    /// Returns the geometries (same order as the input) and the border arcs of
+    /// the polygons that survived.
+    pub fn finish(
+        &self,
+        min_area: f64,
+        keep_largest: impl Fn(usize) -> bool,
+    ) -> (Vec<MultiPolygon<f64>>, Vec<BorderArc>) {
+        let mut uses: Vec<Vec<usize>> = vec![Vec::new(); self.arcs.len()];
+        let mut geoms = Vec::with_capacity(self.plans.len());
+        for (gi, (plan, original)) in self.plans.iter().zip(&self.originals).enumerate() {
+            // (polygon, its arc refs, area)
+            let mut polys: Vec<(Polygon<f64>, Vec<&RingArcs>, f64)> = Vec::new();
+            for p in plan {
+                let mut rings = p.iter().map(|r| {
+                    r.as_ref()
+                        .and_then(|refs| stitch(refs, &self.arcs).map(|ring| (ring, refs)))
+                });
+                let Some(Some((exterior, ext_refs))) = rings.next() else {
+                    continue;
+                };
+                let holes: Vec<(LineString<f64>, &RingArcs)> = rings.flatten().collect();
+                let mut refs = vec![ext_refs];
+                refs.extend(holes.iter().map(|(_, r)| *r));
+                let poly = Polygon::new(exterior, holes.into_iter().map(|(h, _)| h).collect());
+                let area = poly.unsigned_area();
+                polys.push((poly, refs, area));
+            }
+            if polys.is_empty() {
+                geoms.push(largest(original));
+                continue;
+            }
+            let largest_idx = (0..polys.len())
+                .max_by(|&x, &y| polys[x].2.total_cmp(&polys[y].2).then(y.cmp(&x)))
+                .unwrap_or(0);
+            let keep = keep_largest(gi);
+            let mut kept = Vec::new();
+            for (i, (poly, refs, area)) in polys.into_iter().enumerate() {
+                if area >= min_area || (keep && i == largest_idx) {
+                    for r in refs {
+                        for &(arc, _) in r {
+                            uses[arc].push(gi);
+                        }
+                    }
+                    kept.push(poly);
+                }
+            }
+            geoms.push(MultiPolygon(kept));
+        }
+
+        let borders = self
+            .arcs
+            .iter()
+            .zip(uses)
+            .filter(|(coords, _)| coords.len() >= 2)
+            .filter_map(|(coords, mut users)| {
+                let a = *users.first()?;
+                let total = users.len();
+                users.sort_unstable();
+                users.dedup();
+                let b = match users.as_slice() {
+                    // One geometry, used once: its outline.
+                    [_] if total == 1 => None,
+                    // One geometry using the arc twice: an internal cut, not a border.
+                    [_] => return None,
+                    [x, y, ..] => Some(if *x == a { *y } else { *x }),
+                    [] => return None,
+                };
+                Some(BorderArc {
+                    coords: coords.clone(),
+                    a,
+                    b,
+                })
+            })
+            .collect();
+        (geoms, borders)
+    }
+}
+
 /// Simplifies a set of geometries together so shared borders stay shared.
 ///
 /// Output has the same length and order as the input. A geometry is never
@@ -45,65 +228,9 @@ pub fn simplify_shared(geoms: &[MultiPolygon<f64>], epsilon: f64) -> Vec<MultiPo
     if epsilon <= 0.0 {
         return geoms.to_vec();
     }
-
-    // Open, de-duplicated rings: geoms → polygons → rings → vertices.
-    let rings: Vec<Vec<Vec<Vec<Coord<f64>>>>> = geoms
-        .iter()
-        .map(|mp| {
-            mp.0.iter()
-                .map(|p| {
-                    std::iter::once(p.exterior())
-                        .chain(p.interiors())
-                        .map(open_ring)
-                        .collect()
-                })
-                .collect()
-        })
-        .collect();
-
-    let junctions = find_junctions(rings.iter().flatten().flatten());
-
-    let mut arcs: Vec<Vec<Coord<f64>>> = Vec::new();
-    let mut index: HashMap<Vec<Key>, usize> = HashMap::new();
-    let plans: Vec<Vec<Vec<Option<RingArcs>>>> = rings
-        .iter()
-        .map(|g| {
-            g.iter()
-                .map(|p| {
-                    p.iter()
-                        .map(|r| cut_ring(r, &junctions, &mut arcs, &mut index))
-                        .collect()
-                })
-                .collect()
-        })
-        .collect();
-
-    let simplified: Vec<Vec<Coord<f64>>> = arcs
-        .into_iter()
-        .map(|a| LineString(a).simplify_vw(&epsilon).0)
-        .collect();
-
-    geoms
-        .iter()
-        .zip(&plans)
-        .map(|(original, g)| {
-            let polys: Vec<Polygon<f64>> = g
-                .iter()
-                .filter_map(|p| {
-                    let mut rs = p
-                        .iter()
-                        .map(|r| r.as_ref().and_then(|r| stitch(r, &simplified)));
-                    let exterior = rs.next().flatten()?;
-                    Some(Polygon::new(exterior, rs.flatten().collect()))
-                })
-                .collect();
-            if polys.is_empty() {
-                largest(original)
-            } else {
-                MultiPolygon(polys)
-            }
-        })
-        .collect()
+    let mut t = Topology::build(geoms);
+    t.simplify(epsilon);
+    t.finish(0.0, |_| true).0
 }
 
 fn open_ring(ring: &LineString<f64>) -> Vec<Coord<f64>> {
@@ -273,6 +400,78 @@ mod tests {
             bw.len()
         );
         assert_eq!(bw, be);
+    }
+
+    fn sq(x: f64, y: f64) -> Polygon<f64> {
+        Polygon::new(
+            LineString::from(vec![
+                (x, y),
+                (x + 1.0, y),
+                (x + 1.0, y + 1.0),
+                (x, y + 1.0),
+                (x, y),
+            ]),
+            vec![],
+        )
+    }
+
+    fn length(b: &BorderArc) -> f64 {
+        b.coords
+            .windows(2)
+            .map(|w| ((w[1].x - w[0].x).powi(2) + (w[1].y - w[0].y).powi(2)).sqrt())
+            .sum()
+    }
+
+    #[test]
+    fn shared_border_is_one_arc_between_two_geometries() {
+        let t = Topology::build(&[
+            MultiPolygon(vec![sq(0.0, 0.0)]),
+            MultiPolygon(vec![sq(1.0, 0.0)]),
+        ]);
+        let (geoms, borders) = t.finish(0.0, |_| true);
+        assert_eq!(geoms.len(), 2);
+        let shared: Vec<&BorderArc> = borders.iter().filter(|b| b.b.is_some()).collect();
+        assert_eq!(shared.len(), 1);
+        assert_eq!(length(shared[0]), 1.0);
+        let outline: f64 = borders.iter().filter(|b| b.b.is_none()).map(length).sum();
+        assert_eq!(outline, 6.0, "outer perimeter of the 2x1 block");
+    }
+
+    #[test]
+    fn cut_inside_one_geometry_is_not_a_border() {
+        // One feature made of two touching parts (like an island cut at 180°).
+        let t = Topology::build(&[MultiPolygon(vec![sq(0.0, 0.0), sq(1.0, 0.0)])]);
+        let (_, borders) = t.finish(0.0, |_| true);
+        assert!(borders.iter().all(|b| b.b.is_none()));
+        let total: f64 = borders.iter().map(length).sum();
+        assert_eq!(total, 6.0, "the internal cut is not drawn");
+    }
+
+    #[test]
+    fn culled_islands_take_their_borders_with_them() {
+        let islands = MultiPolygon(vec![
+            sq(0.0, 0.0),
+            Polygon::new(
+                LineString::from(vec![(5.0, 5.0), (5.1, 5.0), (5.1, 5.1), (5.0, 5.0)]),
+                vec![],
+            ),
+        ]);
+        let t = Topology::build(&[islands]);
+        let (geoms, borders) = t.finish(0.5, |_| false);
+        assert_eq!(geoms[0].0.len(), 1);
+        let total: f64 = borders.iter().map(length).sum();
+        assert_eq!(total, 4.0);
+    }
+
+    #[test]
+    fn outline_segments_exclude_shared_borders() {
+        let t = Topology::build(&[
+            MultiPolygon(vec![sq(0.0, 0.0)]),
+            MultiPolygon(vec![sq(1.0, 0.0)]),
+        ]);
+        let segs = t.outline_segments();
+        assert!(segs.iter().all(|l| !(l.start.x == 1.0 && l.end.x == 1.0)));
+        assert_eq!(segs.len(), 6);
     }
 
     #[test]
