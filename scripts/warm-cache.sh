@@ -6,7 +6,8 @@
 #   scripts/warm-cache.sh https://map-generator.toolforge.org/api/v1
 #
 # Sequential and polite: one request at a time. CURL overrides the curl
-# binary (default: curl on PATH).
+# binary (default: curl on PATH). SKIP lists datasets to leave out (default
+# `mixed`: its maps are combinations, and its single regions repeat others).
 set -euo pipefail
 base="${1:-http://localhost:8000/api/v1}"
 curl="${CURL:-curl}"
@@ -18,7 +19,9 @@ json_list() { # url python-expression-over-d
 datasets="$(json_list "$base/datasets" 'x["id"] for x in d')"
 [[ -n "$datasets" ]] || { echo "no datasets at $base" >&2; exit 1; }
 ok=0 failed=0
+skip=" ${SKIP-mixed} "
 for dataset in $datasets; do
+  [[ "$skip" == *" $dataset "* ]] && continue
   regions="$(json_list "$base/datasets/$dataset/regions" 'urllib.parse.quote(x["code"]) for x in d')"
   for region in $regions; do
     for q in "" "labels=true"; do
