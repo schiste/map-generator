@@ -43,8 +43,9 @@ for view in IND PAK; do
     --labels --width 600 --title "Kashmir ($view view)" \
     -o "$E/kashmir-$(echo "$view" | tr '[:upper:]' '[:lower:]').svg"
 done
+# Colours as CSS custom properties (restyle from a page's CSS; librsvg reads the fallbacks).
 $M render -i "$D/ne_10m_admin_1.geojson" --dataset ne-admin1 --region FJI "${CTX[@]}" \
-  --width 500 --title "Fiji (straddles 180°)" -o "$E/fiji.svg"
+  --css-vars --width 500 --title "Fiji (straddles 180°)" -o "$E/fiji.svg"
 
 # geoBoundaries, converted to indexed GeoPackages with readable ids
 # (licence read from the .license.json sidecar and credited in the map).

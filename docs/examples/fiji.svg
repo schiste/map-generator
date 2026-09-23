@@ -4,24 +4,24 @@
 <desc id="attribution">Natural Earth (de facto view)</desc>
 <style>
 path{fill-rule:evenodd}
-.mg-background{fill:#ffffff}
-.mg-water{fill:#c6ecff}
-.mg-context{fill:#f6e1b9}
-.mg-land{fill:#fefee9}
-.mg-lake{fill:#c6ecff;stroke:#0978ab;stroke-width:0.4}
+.mg-background{fill:var(--mg-background,#ffffff)}
+.mg-water{fill:var(--mg-water,#c6ecff)}
+.mg-context{fill:var(--mg-context-land,#f6e1b9)}
+.mg-land{fill:var(--mg-land,#fefee9)}
+.mg-lake{fill:var(--mg-water,#c6ecff);stroke:var(--mg-lake-border,#0978ab);stroke-width:0.4}
 .mg-border{fill:none;stroke-linejoin:round;stroke-linecap:round}
-.mg-border-context{stroke:#a08070;stroke-width:0.4}
-.mg-border-internal{stroke:#646464;stroke-width:0.5}
-.mg-border-parent{stroke:#646464;stroke-width:1}
-.mg-border-outline{stroke:#646464;stroke-width:0.8}
-.mg-border-coast{stroke:#0978ab}
-.mg-border-disputed{stroke:#646464;stroke-width:0.8;stroke-dasharray:3.2 2}
-.mg-disputed-area{fill:url(#mg-hatch);stroke:#646464;stroke-width:0.8;stroke-dasharray:3.2 2}
-.mg-hatch{stroke:#646464;stroke-width:1}
-.mg-label{fill:#333333;font:11px sans-serif;text-anchor:middle;paint-order:stroke;stroke:#fefee9;stroke-width:2.5px;stroke-linejoin:round}
-.mg-leader{fill:none;stroke:#333333;stroke-width:0.6}
-.mg-inset-frame{fill:none;stroke:#646464;stroke-width:1}
-.mg-credit{fill:#333333;font:9px sans-serif;text-anchor:end;opacity:.75}
+.mg-border-context{stroke:var(--mg-context-border,#a08070);stroke-width:0.4}
+.mg-border-internal{stroke:var(--mg-border,#646464);stroke-width:0.5}
+.mg-border-parent{stroke:var(--mg-border,#646464);stroke-width:1}
+.mg-border-outline{stroke:var(--mg-outline,#646464);stroke-width:0.8}
+.mg-border-coast{stroke:var(--mg-coast,#0978ab)}
+.mg-border-disputed{stroke:var(--mg-disputed-border,#646464);stroke-width:0.8;stroke-dasharray:3.2 2}
+.mg-disputed-area{fill:url(#mg-hatch);stroke:var(--mg-disputed-border,#646464);stroke-width:0.8;stroke-dasharray:3.2 2}
+.mg-hatch{stroke:var(--mg-disputed-border,#646464);stroke-width:1}
+.mg-label{fill:var(--mg-label,#333333);font:11px sans-serif;text-anchor:middle;paint-order:stroke;stroke:var(--mg-land,#fefee9);stroke-width:2.5px;stroke-linejoin:round}
+.mg-leader{fill:none;stroke:var(--mg-label,#333333);stroke-width:0.6}
+.mg-inset-frame{fill:none;stroke:var(--mg-outline,#646464);stroke-width:1}
+.mg-credit{fill:var(--mg-label,#333333);font:9px sans-serif;text-anchor:end;opacity:.75}
 </style>
 <rect id="background" class="mg-background" width="500" height="669"/>
 <path id="water" class="mg-water" d="M500 668.2L500 0L0 0L0 668.2Z"/>

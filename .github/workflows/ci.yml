@@ -57,6 +57,19 @@ jobs:
       - name: Gallery is byte-identical
         run: git diff --exit-code --stat docs/examples
 
+  # Renders gallery maps with librsvg (Wikimedia Commons' renderer) in Debian
+  # trixie and compares them with tests/rsvg/ references.
+  rsvg:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/rsvg-check.sh
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rsvg-check
+          path: target/rsvg-check
+
   # EPSG projections through PROJ (built from source: `bundled-proj`).
   proj:
     runs-on: ubuntu-latest

@@ -17,8 +17,12 @@ Thanks for helping! A few ground rules keep the output reproducible:
    UPDATE_GOLDEN=1 cargo test -p mapgen-data --test golden
    git diff crates/mapgen-data/tests/fixtures
    ```
-4. If the change affects rendering, run `scripts/build-examples.sh` (after
-   `scripts/fetch-data.sh ne-geojson`) and commit the updated `docs/examples`.
+4. If the change affects rendering, run `scripts/build-examples.sh` (after the
+   `scripts/fetch-data.sh` calls listed at its top) and commit the updated
+   `docs/examples`. Then run `scripts/rsvg-check.sh` (needs Docker): it renders
+   gallery maps with librsvg, Wikimedia Commons' renderer. If the change is
+   intended, `scripts/rsvg-check.sh --update`, look at the new `tests/rsvg/*.png`,
+   and commit them.
 5. Only public-domain or openly licensed data. Do not add support for sources with
    non-commercial or no-redistribution terms (see `docs/data-sources.md`). Do not commit
    datasets; test fixtures must be hand-made or public domain.
