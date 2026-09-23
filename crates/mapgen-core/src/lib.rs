@@ -16,6 +16,7 @@ pub mod feature;
 pub mod frame;
 pub mod html;
 pub mod labels;
+pub mod layout;
 mod math;
 pub mod panel;
 pub mod pipeline;
@@ -30,6 +31,7 @@ pub use error::{Error, Result};
 pub use feature::{MapFeature, MapLine};
 pub use frame::{FrameMode, GeoBBox};
 pub use html::html_page;
+pub use layout::LegendSlot;
 pub use pipeline::{
     render, BorderMode, InsetInfo, InsetMode, MapLayers, RenderOptions, Rendered, Target,
 };

@@ -95,7 +95,7 @@ fn char_width(c: char) -> f64 {
     }
 }
 
-fn text_width(text: &str, size: f64) -> f64 {
+pub(crate) fn text_width(text: &str, size: f64) -> f64 {
     size * text.chars().map(char_width).sum::<f64>()
 }
 

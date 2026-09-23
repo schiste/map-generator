@@ -8,6 +8,7 @@ use rstar::RTree;
 use crate::error::{Error, Result};
 use crate::feature::{MapFeature, MapLine};
 use crate::frame::{anchor as frame_anchor, clusters, Cluster, FrameMode};
+use crate::layout::{LegendSlot, Occupancy};
 use crate::panel::{build_panel, panel_labels, GeoExtent, Panel, PanelSpec, Placement};
 use crate::projection::{
     one_sixth_parallels, Albers, EqualEarth, LambertAzimuthalEqualArea, LambertConformalConic,
@@ -191,6 +192,8 @@ pub struct Rendered {
     /// in an inset).
     pub outside_frame: Vec<String>,
     pub insets: Vec<InsetInfo>,
+    /// Empty areas for a legend or title, largest first (see `layout`).
+    pub legend_slots: Vec<LegendSlot>,
 }
 
 /// Renders a map. Output is a pure function of the inputs: layers are sorted
@@ -350,6 +353,27 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
         .into_iter()
         .collect();
 
+    let legend_slots = {
+        let mut occ = Occupancy::new(grid.cell, grid.cols, grid.rows, grid.land.clone());
+        for b in &boxes {
+            occ.mark(*b, 4.0, true);
+        }
+        occ.mark_labels(&panels[0].labels);
+        if let (true, Some(credit)) = (opts.credit, credit_with_version(opts)) {
+            // Right-aligned 9 px text at the bottom-right corner.
+            let w = 0.56 * 9.0 * credit.chars().count() as f64;
+            occ.mark(
+                Rect::new(
+                    coord! { x: width - 4.0 - w, y: height - 14.0 },
+                    coord! { x: width, y: height },
+                ),
+                0.0,
+                false,
+            );
+        }
+        occ.slots()
+    };
+
     let svg = write_svg(&SvgDocument {
         width: opts.width,
         height: height as u32,
@@ -372,6 +396,7 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
         projection,
         outside_frame,
         insets,
+        legend_slots,
     })
 }
 

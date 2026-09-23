@@ -163,7 +163,7 @@ scripts/commons-status.py out/manifest.csv
 Other useful flags: `--width`, `--padding`, `--simplify` (px), `--min-area` (px²), `--margin`,
 `--frame auto|all|world`, `--insets auto|none`, `--max-insets`, `--snap` (px), `--no-leaders`,
 `--no-curved-labels`, `--label-min-scale`, `--parent-column`, `--name-column name_fr` (Natural Earth
-ships names in about 40 languages), and `--attribution` / `--credit`. Run `mapgen render --help` for the full list.
+ships names in about 40 languages), and `--attribution` / `--credit`, and `--metadata out.json` (size, insets, SHA-1, and `legendSlots`: the empty areas where a legend or title can go). Run `mapgen render --help` for the full list.
 
 ## In the browser (WebAssembly)
 

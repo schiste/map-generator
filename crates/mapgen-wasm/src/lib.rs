@@ -151,6 +151,19 @@ export interface UnitColumns {
   nameColumn?: string;
 }
 
+export interface LegendSlot {
+  position:
+    | "top-left" | "top-center" | "top-right"
+    | "middle-left" | "center" | "middle-right"
+    | "bottom-left" | "bottom-center" | "bottom-right";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Share of land under a box a third of the map wide and high at this position. */
+  landShare: number;
+}
+
 export interface MapOutput {
   svg: string;
   html?: string;
@@ -165,6 +178,10 @@ export interface MapOutput {
   outsideFrame: string[];
   /** Inset boxes: the regions in each and its projection. */
   insets: { ids: string[]; projection: string }[];
+  /** Empty areas for a legend or title, in pixels, largest first; width 0 when nothing fits. */
+  legendSlots: LegendSlot[];
+  /** Version of the SVG contract (docs/contract.md). */
+  contract: number;
   /** How the data-unit table fits the map (when set). */
   units?: {
     unknownRegions: string[];

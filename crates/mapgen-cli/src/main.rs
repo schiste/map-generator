@@ -717,6 +717,11 @@ struct RenderArgs {
     /// Document title.
     #[arg(long)]
     title: Option<String>,
+    /// Also write the map's metadata as JSON: size, projection, insets,
+    /// regions left out, empty areas for a legend (`legendSlots`), SHA-1,
+    /// credit and boundary version, as the API's `.json` maps.
+    #[arg(long)]
+    metadata: Option<PathBuf>,
     #[command(flatten)]
     style: StyleArgs,
     #[command(flatten)]
@@ -952,6 +957,31 @@ fn run_render(args: RenderArgs) -> Result<()> {
         rendered.svg
     };
     std::fs::write(&args.out, &body).with_context(|| format!("writing {}", args.out.display()))?;
+    if let Some(path) = &args.metadata {
+        let slots: Vec<serde_json::Value> = rendered
+            .legend_slots
+            .iter()
+            .map(|s| {
+                serde_json::json!({"position": s.position, "x": s.x, "y": s.y,
+                    "width": s.width, "height": s.height, "landShare": s.land_share})
+            })
+            .collect();
+        let meta = serde_json::json!({
+            "width": rendered.width,
+            "height": rendered.height,
+            "projection": rendered.projection.name(),
+            "insets": rendered.insets.iter().map(|i| serde_json::json!({"ids": i.ids, "projection": i.projection})).collect::<Vec<_>>(),
+            "outsideFrame": rendered.outside_frame,
+            "legendSlots": slots,
+            "sha1": commons::sha1_hex(body.as_bytes()),
+            "credit": opts.attribution,
+            "boundaryYear": opts.boundary_year,
+            "sourceRelease": opts.source_release,
+            "contract": mapgen_core::CONTRACT_VERSION,
+        });
+        std::fs::write(path, serde_json::to_string_pretty(&meta)? + "\n")
+            .with_context(|| format!("writing {}", path.display()))?;
+    }
 
     eprintln!(
         "wrote {} ({}×{} px, {} regions, {} bytes, {})",

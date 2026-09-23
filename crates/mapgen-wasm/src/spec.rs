@@ -550,9 +550,37 @@ pub struct MapOutput {
     /// Ids of subject regions shown nowhere (outside the frame, no inset).
     pub outside_frame: Vec<String>,
     pub insets: Vec<InsetOutput>,
+    /// Empty areas for a legend or title, largest first.
+    pub legend_slots: Vec<LegendSlotOutput>,
+    /// Version of the SVG contract the map follows.
+    pub contract: u32,
     /// Present when a data-unit table is set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub units: Option<UnitReportOutput>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegendSlotOutput {
+    pub position: &'static str,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub land_share: f64,
+}
+
+impl From<&mapgen_core::LegendSlot> for LegendSlotOutput {
+    fn from(s: &mapgen_core::LegendSlot) -> Self {
+        LegendSlotOutput {
+            position: s.position,
+            x: s.x,
+            y: s.y,
+            width: s.width,
+            height: s.height,
+            land_share: s.land_share,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -663,6 +691,8 @@ pub fn render_map(src: Sources, spec: &RenderSpec) -> Result<MapOutput> {
                 projection: i.projection,
             })
             .collect(),
+        legend_slots: rendered.legend_slots.iter().map(Into::into).collect(),
+        contract: mapgen_core::CONTRACT_VERSION,
         units: unit_report,
     })
 }

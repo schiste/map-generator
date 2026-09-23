@@ -38,6 +38,11 @@ test("result is a plain JS object with metadata", () => {
   assert.deepEqual(out.outsideFrame, []);
   assert.equal(out.center.length, 2);
   assert.equal(out.html, undefined);
+  assert.equal(out.contract, 1);
+  assert.equal(out.legendSlots.length, 9);
+  const best = out.legendSlots[0];
+  assert.ok(best.width >= 48 && best.height >= 48, JSON.stringify(best));
+  assert.ok(best.landShare >= 0 && best.landShare <= 1);
 });
 
 test("errors are thrown as Error with helpful messages", () => {
