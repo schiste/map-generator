@@ -511,6 +511,7 @@ async fn features(
                     "parentName": f.parent_name,
                     "country": f.country,
                     "units": f.units,
+                    "wikidata": f.wikidata,
                 })
             })
             .collect();

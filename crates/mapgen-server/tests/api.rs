@@ -587,7 +587,8 @@ async fn regions_by_iso2_and_names_in_other_languages() {
     std::fs::create_dir_all(&dir).unwrap();
     let country = |a3: &str, a2: &str, name: &str, fr: &str, x: f64| {
         format!(
-            r#"{{"type":"Feature","properties":{{"ADM0_A3":"{a3}","ISO_A2_EH":"{a2}","NAME":"{name}","NAME_FR":"{fr}"}},"geometry":{{"type":"Polygon","coordinates":[[[{x},45],[{x1},45],[{x1},46],[{x},46],[{x},45]]]}}}}"#,
+            r#"{{"type":"Feature","properties":{{"ADM0_A3":"{a3}","ISO_A2_EH":"{a2}","NAME":"{name}","NAME_FR":"{fr}","WIKIDATAID":"{qid}"}},"geometry":{{"type":"Polygon","coordinates":[[[{x},45],[{x1},45],[{x1},46],[{x},46],[{x},45]]]}}}}"#,
+            qid = if a3 == "DEU" { "Q183" } else { "" },
             x1 = x + 1.0
         )
     };
@@ -655,6 +656,15 @@ async fn regions_by_iso2_and_names_in_other_languages() {
         worldview["choices"],
         serde_json::json!([{ "value": "DEU", "label": "Germany (DEU)" }])
     );
+    // Features carry their Wikidata item (null when the data has none).
+    let features = get(&app, "/api/v1/datasets/countries/regions/DEU/features")
+        .await
+        .json();
+    assert_eq!(features[0]["wikidata"], "Q183");
+    let features = get(&app, "/api/v1/datasets/countries/regions/NLD/features")
+        .await
+        .json();
+    assert!(features[0]["wikidata"].is_null());
     let r = get(&app, "/api/v1/maps/countries/DEU.svg?capitals=countries").await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
     assert!(
