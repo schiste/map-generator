@@ -350,7 +350,7 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
     }
     for d in disputed {
         for l in d {
-            let l = if eps > 0.0 { l.simplify_vw(&eps) } else { l };
+            let l = if eps > 0.0 { l.simplify_vw(eps) } else { l };
             by_kind.entry(BorderKind::Disputed).or_default().push(l);
         }
     }

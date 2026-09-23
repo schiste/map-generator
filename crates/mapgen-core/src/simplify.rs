@@ -108,7 +108,7 @@ impl Topology {
             return;
         }
         for a in &mut self.arcs {
-            *a = LineString(std::mem::take(a)).simplify_vw(&epsilon).0;
+            *a = LineString(std::mem::take(a)).simplify_vw(epsilon).0;
         }
     }
 

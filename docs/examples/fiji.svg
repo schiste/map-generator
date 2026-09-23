@@ -26,7 +26,7 @@ path{fill-rule:evenodd}
 <rect id="background" class="mg-background" width="500" height="669"/>
 <path id="water" class="mg-water" d="M500 668.2L500 0L0 0L0 668.2Z"/>
 <g id="context">
-<path id="WLF" class="mg-context country wf" data-name="Wallis and Futuna Is." data-code="WLF" d="M483 145L483.7 146.9L484.9 148.8L485.5 149.2L488.5 149.6L491.9 149.9L492 149.5L488 147.1L485.8 144.7L483.5 144Z"><title>Wallis and Futuna Is.</title></path>
+<path id="WLF" class="mg-context country wf" data-name="Wallis and Futuna Is." data-code="WLF" d="M483.5 144L483 145L483.7 146.9L484.9 148.8L485.5 149.2L488.5 149.6L491.9 149.9L492 149.5L488 147.1L485.8 144.7Z"><title>Wallis and Futuna Is.</title></path>
 </g>
 <g id="context-borders">
 <path class="mg-border mg-border-context" d="M483 145L483.5 144L485.8 144.7L488 147.1L492 149.5L491.9 149.9L488.5 149.6L485.5 149.2L484.9 148.8L483.7 146.9L483 145"/>
