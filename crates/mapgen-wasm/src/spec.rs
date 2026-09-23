@@ -7,7 +7,7 @@ use mapgen_core::frame::BBOX_PRESETS;
 use mapgen_core::units::{check_units, dissolve, tag_units, UnitRow};
 use mapgen_core::{
     render, BorderMode, Color, FrameMode, GeoBBox, InsetMode, MapFeature, MapLayers, MapLine,
-    ProjectionChoice, RenderOptions, Theme,
+    ProjectionChoice, RenderOptions, Target, Theme,
 };
 use mapgen_data::{LayerQuery, Source};
 use serde::{Deserialize, Serialize};
@@ -271,6 +271,13 @@ pub enum Borders {
     Regions,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TargetSpec {
+    Commons,
+    Web,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Insets {
@@ -326,6 +333,9 @@ pub struct RenderSpec {
     /// each region strokes its own outline.
     #[serde(default)]
     pub border_mode: Borders,
+    /// `commons` (curved labels as rotated letters, for librsvg) or `web`
+    /// (textPath). Default: `web` for HTML output, `commons` otherwise.
+    pub target: Option<TargetSpec>,
     /// With a data-unit table: merge each unit's regions into one shape.
     #[serde(default)]
     pub dissolve: bool,
@@ -410,6 +420,11 @@ impl RenderSpec {
             border_mode: match self.border_mode {
                 Borders::Layer => BorderMode::Layer,
                 Borders::Regions => BorderMode::Regions,
+            },
+            target: match (self.target, self.format) {
+                (Some(TargetSpec::Commons), _) => Target::Commons,
+                (Some(TargetSpec::Web), _) | (None, Format::Html) => Target::Web,
+                (None, _) => Target::Commons,
             },
             label_leaders: self.leaders.unwrap_or(d.label_leaders),
             label_curved: self.curved_labels.unwrap_or(d.label_curved),

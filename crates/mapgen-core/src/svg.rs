@@ -4,8 +4,9 @@ use std::fmt::Write;
 use geo_types::{LineString, MultiPolygon};
 
 use crate::feature::MapFeature;
-use crate::labels::{Label, LabelShape};
+use crate::labels::{letters, Label, LabelShape};
 use crate::panel::{BorderKind, Panel};
+use crate::pipeline::Target;
 use crate::theme::Theme;
 
 /// Affine transform from projected metres to SVG pixels (y axis flipped).
@@ -53,6 +54,7 @@ pub struct SvgDocument<'a> {
     pub css_vars: bool,
     /// Region fills stroke their own outlines (`BorderMode::Regions`).
     pub region_strokes: bool,
+    pub target: Target,
 }
 
 /// Serialises a map into an SVG document.
@@ -203,7 +205,14 @@ fn write_panel(
         vp,
         p,
     );
-    write_labels(out, ids, &group("labels"), panel, doc.theme.label_size);
+    write_labels(
+        out,
+        ids,
+        &group("labels"),
+        panel,
+        doc.theme.label_size,
+        doc.target,
+    );
     if let Some(b) = panel.inset_box {
         let _ = writeln!(
             out,
@@ -253,7 +262,7 @@ pub fn stylesheet(theme: &Theme, css_vars: bool, region_strokes: bool) -> String
          .mg-border-disputed{{stroke:{disputed};stroke-width:{dw};stroke-dasharray:{dash1} {dash2}}}\n\
          .mg-disputed-area{{fill:url(#mg-hatch);stroke:{disputed};stroke-width:{dw};stroke-dasharray:{dash1} {dash2}}}\n\
          .mg-hatch{{stroke:{disputed};stroke-width:1}}\n\
-         .mg-label{{fill:{label};font:{ls}px sans-serif;text-anchor:middle;dominant-baseline:central;\
+         .mg-label{{fill:{label};font:{ls}px sans-serif;text-anchor:middle;\
          paint-order:stroke;stroke:{land};stroke-width:2.5px;stroke-linejoin:round}}\n\
          .mg-leader{{fill:none;stroke:{label};stroke-width:0.6}}\n\
          .mg-inset-frame{{fill:none;stroke:{outline};stroke-width:1}}\n\
@@ -392,6 +401,7 @@ fn write_labels(
     group: &str,
     panel: &Panel,
     nominal: f64,
+    target: Target,
 ) {
     let (labels, subject) = (&panel.labels, &panel.subject);
     if labels.is_empty() && panel.translations.iter().all(|(_, t)| t.is_empty()) {
@@ -400,7 +410,7 @@ fn write_labels(
     let _ = writeln!(out, "<g {group}>");
     if panel.translations.is_empty() {
         for l in labels {
-            for e in label_elements(ids, l, subject, nominal, None) {
+            for e in label_elements(ids, l, subject, nominal, None, target) {
                 let _ = writeln!(out, "{e}");
             }
         }
@@ -429,7 +439,7 @@ fn write_labels(
         if variants.is_empty() {
             for e in default
                 .iter()
-                .flat_map(|l| label_elements(ids, l, subject, nominal, None))
+                .flat_map(|l| label_elements(ids, l, subject, nominal, None, target))
             {
                 let _ = writeln!(out, "{e}");
             }
@@ -445,12 +455,16 @@ fn write_labels(
                 Some(l) => write_alternative(
                     out,
                     &attr,
-                    label_elements(ids, &l, subject, nominal, Some(lang)),
+                    label_elements(ids, &l, subject, nominal, Some(lang), target),
                 ),
             }
         }
         if let Some(l) = default {
-            write_alternative(out, "", label_elements(ids, &l, subject, nominal, None));
+            write_alternative(
+                out,
+                "",
+                label_elements(ids, &l, subject, nominal, None, target),
+            );
         }
         out.push_str("</switch>\n");
     }
@@ -475,13 +489,16 @@ fn write_alternative(out: &mut String, attr: &str, elements: Vec<String>) {
     }
 }
 
-/// The SVG elements of one label.
+/// The SVG elements of one label. Text is centred on `(x, y)` by shifting
+/// the baseline down by `BASELINE_SHIFT` em rather than with
+/// `dominant-baseline`, which librsvg doesn't reliably support.
 fn label_elements(
     ids: &mut HashSet<String>,
     l: &Label,
     subject: &[MapFeature],
     nominal: f64,
     lang: Option<&str>,
+    target: Target,
 ) -> Vec<String> {
     // The stylesheet sets the nominal size; shrunk labels override it.
     let style = if (l.size - nominal).abs() > 1e-9 {
@@ -490,11 +507,12 @@ fn label_elements(
         String::new()
     };
     let text = escape(&l.text);
+    let shift = BASELINE_SHIFT * l.size;
     let straight = || {
         format!(
             "<text class=\"mg-label\" x=\"{}\" y=\"{}\"{style}>{text}</text>",
             fmt_num(l.x, 1),
-            fmt_num(l.y, 1)
+            fmt_num(l.y + shift, 1)
         )
     };
     match &l.shape {
@@ -509,6 +527,26 @@ fn label_elements(
             ),
             straight(),
         ],
+        LabelShape::Curved { path } if target == Target::Commons => {
+            // One group, named for screen readers, of rotated letters.
+            let mut g = format!("<g class=\"mg-label\" aria-label=\"{text}\"{style}>");
+            for (c, x, y, angle) in letters(path, &l.text, l.size) {
+                if c.is_whitespace() {
+                    continue;
+                }
+                let _ = write!(
+                    g,
+                    "<text transform=\"translate({} {}) rotate({})\" y=\"{}\">{}</text>",
+                    fmt_num(x, 1),
+                    fmt_num(y, 1),
+                    fmt_num(angle, 1),
+                    fmt_num(shift, 1),
+                    escape(&c.to_string())
+                );
+            }
+            g.push_str("</g>");
+            vec![g]
+        }
         LabelShape::Curved { path } => {
             let base = subject.get(l.feature).map_or("label", |f| f.id.as_str());
             let raw = match lang {
@@ -529,12 +567,17 @@ fn label_elements(
             vec![
                 format!("<path id=\"{id}\" fill=\"none\" d=\"{d}\"/>"),
                 format!(
-                    "<text class=\"mg-label\"{style}><textPath href=\"#{id}\" startOffset=\"50%\">{text}</textPath></text>"
+                    "<text class=\"mg-label\" dy=\"{}\"{style}><textPath href=\"#{id}\" startOffset=\"50%\">{text}</textPath></text>",
+                    fmt_num(shift, 1)
                 ),
             ]
         }
     }
 }
+
+/// Shift from a label's centre to its baseline, in em: about half the
+/// x-height plus half the cap height of common sans-serif fonts.
+const BASELINE_SHIFT: f64 = 0.35;
 
 /// Makes a valid, unique XML id: invalid characters become `_`, ids that
 /// can't start a name get an `id-` prefix, and repeats get `-2`, `-3`...

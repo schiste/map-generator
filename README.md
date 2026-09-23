@@ -37,6 +37,7 @@ colour the map by country, neighbours included.
 - **Antimeridian-safe.** Fiji, Russia and Kiribati are centred correctly, and datasets' artificial 180° cuts (Taveuni) are never drawn as borders.
 - **Insets.** Far-away parts (Alaska, Hawaii, Puerto Rico, French overseas départements) go in corner boxes, sized by area and placed where they cover the least of the map.
 - **Labels that fit.** Placed at each region's visual centre, shrunk to fit, curved along long thin shapes (Chile), or outside small regions with a leader line where that covers no other region.
+- **Renders on Wikimedia Commons.** Output avoids what librsvg (Commons' renderer) doesn't support: curved labels are rotated letters rather than `textPath` (`--target web` keeps `textPath`, the default for `.html`), and labels are centred without `dominant-baseline`.
 - **Multilingual.** `--languages fr,ar,zh-Hans,zh-Hant` labels one file in several languages from Natural Earth's names: each language is placed separately (names differ in length), and viewers get theirs through SVG `<switch>`/`systemLanguage`, as Wikimedia Commons' `lang=` does.
 - **Two datasets, one border.** Neighbouring countries from one dataset are snapped onto the outline of regions from another, closing gaps and doubled borders.
 - **Easy restyling.** Four themes plus a flag for every colour. Colours live in one `<style>` block, can be emitted as CSS custom properties, and `.html` output adds live colour pickers.

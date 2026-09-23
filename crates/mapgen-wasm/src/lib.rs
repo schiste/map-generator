@@ -88,6 +88,8 @@ export interface RenderSpec {
   languages?: string[];
   /** "layer" (default): borders drawn once, by kind; "regions": each region strokes its outline. */
   borderMode?: "layer" | "regions";
+  /** "commons" (curved labels as rotated letters, for librsvg) or "web" (textPath). Default: "web" for HTML output, else "commons". */
+  target?: "commons" | "web";
   /** Label small regions outside them with a leader line (default true). */
   leaders?: boolean;
   /** Curve labels along long, thin regions (default true). */

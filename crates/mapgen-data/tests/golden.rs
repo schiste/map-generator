@@ -163,3 +163,45 @@ fn labels_switch_on_system_language() {
     assert_eq!(svg.matches("<switch>").count(), 1);
     assert_eq!(svg.matches(">Eastland</text>").count(), 1);
 }
+
+#[test]
+fn curved_labels_by_target() {
+    // A long, thin diagonal band: too narrow for straight text.
+    let text = r#"{"type":"FeatureCollection","features":[
+      {"type":"Feature","properties":{"id":"XB","name":"Longland"},
+       "geometry":{"type":"Polygon","coordinates":[[[0,0],[0.5,0],[10.5,10],[10,10],[0,0]]]}}]}"#;
+    let subject: Vec<_> = mapgen_data::geojson::rows_from_str(
+        text,
+        &mapgen_data::LayerQuery {
+            id_columns: vec!["id".into()],
+            name_column: "name".into(),
+            ..mapgen_data::LayerQuery::default()
+        },
+    )
+    .unwrap()
+    .into_iter()
+    .map(|(_, f)| f)
+    .collect();
+    let layers = MapLayers {
+        subject,
+        ..MapLayers::default()
+    };
+    let svg = |target| {
+        let opts = RenderOptions {
+            width: 400,
+            labels: true,
+            target,
+            ..RenderOptions::default()
+        };
+        render(&layers, &opts).unwrap().svg
+    };
+    let commons = svg(mapgen_core::Target::Commons);
+    assert!(!commons.contains("textPath") && !commons.contains("dominant-baseline"));
+    assert!(commons
+        .contains("<g class=\"mg-label\" aria-label=\"Longland\"><text transform=\"translate("));
+    assert_eq!(commons.matches(" rotate(").count(), "Longland".len());
+    let web = svg(mapgen_core::Target::Web);
+    assert!(
+        web.contains("<textPath href=\"#label-path-XB\" startOffset=\"50%\">Longland</textPath>")
+    );
+}

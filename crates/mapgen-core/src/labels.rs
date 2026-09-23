@@ -457,6 +457,28 @@ fn centerline(poly: &Polygon<f64>, samples: usize) -> Option<Centerline> {
     Some((line, widths))
 }
 
+/// Letters of a curved label, for renderers without `textPath` (librsvg):
+/// each character's centre on `path` and the path's direction there, in
+/// degrees, centred on the path like `startOffset="50%"` would. Spacing uses
+/// the same width estimate as placement; the direction is taken over one
+/// letter's width, smoothing the centreline's corners.
+pub fn letters(path: &[(f64, f64)], text: &str, size: f64) -> Vec<(char, f64, f64, f64)> {
+    let advance = CHAR_WIDTH * size;
+    let start = (path_length(path) - text_width(text, size)) / 2.0;
+    text.chars()
+        .enumerate()
+        .map(|(i, c)| {
+            let d = start + advance * (i as f64 + 0.5);
+            let (x, y) = point_at(path, d);
+            let (a, b) = (
+                point_at(path, d - advance / 2.0),
+                point_at(path, d + advance / 2.0),
+            );
+            (c, x, y, atan2(b.1 - a.1, b.0 - a.0).to_degrees())
+        })
+        .collect()
+}
+
 fn path_length(p: &[(f64, f64)]) -> f64 {
     p.windows(2)
         .map(|w| ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt())
@@ -628,6 +650,21 @@ mod tests {
         assert!(x < 20.0 && d > 11.0 && d < 12.0, "({x}, {y}) d={d}");
         let centroid = c.centroid().unwrap();
         assert!(!c.contains(&centroid), "the centroid of a C is outside it");
+    }
+
+    #[test]
+    fn letters_follow_the_path_centred() {
+        // An L-shaped path of length 200: along x, then down y.
+        let path = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)];
+        let ls = letters(&path, "ab cd", 10.0);
+        assert_eq!(ls.iter().map(|l| l.0).collect::<String>(), "ab cd");
+        // 5 letters × 5.6 px, centred on the corner at distance 100.
+        let (_, x, y, angle) = ls[0];
+        assert!((x - (100.0 - 14.0 + 2.8)).abs() < 1e-9 && y == 0.0 && angle == 0.0);
+        let (_, x, y, angle) = ls[4];
+        assert!(x == 100.0 && (y - (14.0 - 2.8)).abs() < 1e-9 && angle == 90.0);
+        // The middle letter straddles the corner: its direction is in between.
+        assert!((ls[2].3 - 45.0).abs() < 1e-9);
     }
 
     #[test]

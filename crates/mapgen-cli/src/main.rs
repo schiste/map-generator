@@ -8,7 +8,7 @@ use mapgen_core::units::{check_units, dissolve, tag_units, UnitRow};
 use mapgen_core::validate::{self, CheckOptions, IssueKind};
 use mapgen_core::{
     html_page, render, BorderMode, Color, FrameMode, GeoBBox, InsetMode, MapFeature, MapLayers,
-    MapLine, ProjectionChoice, RenderOptions, Theme,
+    MapLine, ProjectionChoice, RenderOptions, Target, Theme,
 };
 use mapgen_data::crosswalk::{
     apply_code_table, apply_parent_names, crosswalk, load_reference, ReferenceSpec,
@@ -522,6 +522,11 @@ struct StyleArgs {
     /// e.g. for hover highlighting; smaller files).
     #[arg(long, value_enum, default_value = "layer")]
     border_mode: BorderModeArg,
+    /// Renderer the SVG is made for: `commons` (librsvg: curved labels as
+    /// rotated letters, as it has no textPath) or `web` (textPath).
+    /// Default: `web` for .html output, `commons` otherwise.
+    #[arg(long, value_enum)]
+    target: Option<TargetArg>,
     /// Don't place labels of small regions outside them with leader lines.
     #[arg(long)]
     no_leaders: bool,
@@ -582,6 +587,12 @@ enum FrameArg {
 enum BorderModeArg {
     Layer,
     Regions,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum TargetArg {
+    Commons,
+    Web,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -801,6 +812,12 @@ fn options(
         border_mode: match style.border_mode {
             BorderModeArg::Layer => BorderMode::Layer,
             BorderModeArg::Regions => BorderMode::Regions,
+        },
+        target: match style.target {
+            Some(TargetArg::Commons) => Target::Commons,
+            Some(TargetArg::Web) => Target::Web,
+            None if html => Target::Web,
+            None => Target::Commons,
         },
         label_leaders: !style.no_leaders,
         label_curved: !style.no_curved_labels,

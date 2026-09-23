@@ -47,6 +47,18 @@ impl MapLayers {
     }
 }
 
+/// The renderer the SVG is made for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Target {
+    /// Wikimedia Commons (librsvg, which has no `textPath`): curved labels
+    /// are drawn as individually rotated letters.
+    #[default]
+    Commons,
+    /// Browsers: curved labels use `textPath`, so the text stays one
+    /// selectable, searchable string.
+    Web,
+}
+
 /// How region borders are drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BorderMode {
@@ -100,6 +112,7 @@ pub struct RenderOptions {
     /// `<switch>` on `systemLanguage`, with `name` as the fallback.
     pub languages: Vec<String>,
     pub border_mode: BorderMode,
+    pub target: Target,
     /// Place labels of small regions outside them, with a leader line.
     pub label_leaders: bool,
     /// Curve labels along long, thin regions.
@@ -142,6 +155,7 @@ impl Default for RenderOptions {
             labels: false,
             languages: Vec::new(),
             border_mode: BorderMode::Layer,
+            target: Target::Commons,
             label_leaders: true,
             label_curved: true,
             label_min_scale: 0.7,
@@ -325,6 +339,7 @@ pub fn render(layers: &MapLayers, opts: &RenderOptions) -> Result<Rendered> {
         precision: opts.precision,
         css_vars: opts.css_vars,
         region_strokes: opts.border_mode == BorderMode::Regions,
+        target: opts.target,
     });
     Ok(Rendered {
         svg,

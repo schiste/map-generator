@@ -17,7 +17,7 @@ path{fill-rule:evenodd}
 .mg-border-disputed{stroke:#646464;stroke-width:0.8;stroke-dasharray:3.2 2}
 .mg-disputed-area{fill:url(#mg-hatch);stroke:#646464;stroke-width:0.8;stroke-dasharray:3.2 2}
 .mg-hatch{stroke:#646464;stroke-width:1}
-.mg-label{fill:#333333;font:11px sans-serif;text-anchor:middle;dominant-baseline:central;paint-order:stroke;stroke:#fefee9;stroke-width:2.5px;stroke-linejoin:round}
+.mg-label{fill:#333333;font:11px sans-serif;text-anchor:middle;paint-order:stroke;stroke:#fefee9;stroke-width:2.5px;stroke-linejoin:round}
 .mg-leader{fill:none;stroke:#333333;stroke-width:0.6}
 .mg-inset-frame{fill:none;stroke:#646464;stroke-width:1}
 .mg-credit{fill:#333333;font:9px sans-serif;text-anchor:end;opacity:.75}
@@ -33,7 +33,7 @@ path{fill-rule:evenodd}
 <path class="mg-border mg-border-outline" d="M229.5 55.2L159.6 14.8L89.4 54.7L74.3 155.3L87.4 256.3L230 256.8M173.2 135.8L173.1 176.2L144.8 176.1L145 135.7L173.2 135.8M43.9 306.2L43.5 336.4L14.8 336L15.3 305.8L43.9 306.2M229.5 55.2L299.3 34.6L355.5 54.2L385.2 154.6L372.6 255.6L315.4 246.2L272.9 276.8L230 256.8"/>
 </g>
 <g id="labels">
-<text class="mg-label" x="159.3" y="79.6">Westland</text>
-<text class="mg-label" x="310.1" y="162.7">East &amp; Co</text>
+<text class="mg-label" x="159.3" y="83.4">Westland</text>
+<text class="mg-label" x="310.1" y="166.5">East &amp; Co</text>
 </g>
 </svg>

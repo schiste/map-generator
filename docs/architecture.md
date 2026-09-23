@@ -64,6 +64,10 @@ Labels are placed in pixels, largest region first: straight at the pole of inacc
 (polylabel) or nearby positions, then curved along the principal-axis centreline of long,
 thin regions, at 100/85/70 % size; small regions get a leader label outside where the text
 covers no region. Collisions use an R-tree.
+Each language of `--languages` is placed separately. Curved labels are written as
+`textPath` for browsers (`Target::Web`) or as one rotated `<text>` per letter for librsvg,
+which has no `textPath` (`Target::Commons`, the default); text is centred by a 0.35 em
+baseline shift rather than `dominant-baseline`.
 
 ### 6. Output (`svg.rs`, `html.rs`, `theme.rs`)
 
