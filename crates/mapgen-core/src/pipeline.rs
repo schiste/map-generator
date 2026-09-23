@@ -23,6 +23,17 @@ pub struct MapLayers {
     pub lakes: Vec<MapFeature>,
 }
 
+impl MapLayers {
+    /// Removes from `context` the features being mapped: those whose id is the
+    /// region code (e.g. `FRA` when mapping France's subdivisions) or matches a
+    /// subject id.
+    pub fn exclude_subject_from_context(&mut self, region: Option<&str>) {
+        let subject = &self.subject;
+        self.context
+            .retain(|c| Some(c.id.as_str()) != region && !subject.iter().any(|s| s.id == c.id));
+    }
+}
+
 /// End-to-end rendering options.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderOptions {

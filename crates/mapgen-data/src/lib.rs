@@ -2,12 +2,16 @@
 //!
 //! Every adapter returns [`mapgen_core::MapFeature`]s in WGS84, sorted by id.
 //! GeoPackage filters run in SQL, so only the requested region is loaded.
+//! Without the default `gpkg` feature (e.g. on wasm32), only GeoJSON is supported.
 
 pub mod error;
 pub mod geojson;
 mod geometry;
+#[cfg(feature = "gpkg")]
 pub mod gpkg;
 mod layer;
 
 pub use error::{Error, Result};
-pub use layer::{list_regions, read_grouped, read_layer, Format, LayerQuery, Source};
+pub use layer::{
+    group_rows, list_regions, read_grouped, read_layer, read_layer_str, Format, LayerQuery, Source,
+};

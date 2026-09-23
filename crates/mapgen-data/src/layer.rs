@@ -4,7 +4,7 @@ use std::path::Path;
 use mapgen_core::MapFeature;
 
 use crate::error::{Error, Result};
-use crate::{geojson, gpkg};
+use crate::geojson;
 
 /// What to read from a layer. Column names double as GeoJSON property names
 /// (matched case-insensitively).
@@ -111,16 +111,44 @@ pub fn read_layer(
     region: Option<&str>,
 ) -> Result<Vec<MapFeature>> {
     match Format::of(path)? {
-        Format::GeoPackage => gpkg::read_features(path, query, region),
-        Format::GeoJson => {
-            let region = region.filter(|_| query.filter_column.is_some());
-            let mut rows = geojson::read_rows(path, query)?;
-            if let Some(code) = region {
-                rows.retain(|(value, _)| value.as_deref() == Some(code));
-            }
-            Ok(rows.into_iter().map(|(_, f)| f).collect())
-        }
+        Format::GeoPackage => read_gpkg(path, query, region),
+        Format::GeoJson => Ok(filter_rows(geojson::read_rows(path, query)?, query, region)),
     }
+}
+
+/// [`read_layer`] for GeoJSON text already in memory (e.g. in a browser).
+pub fn read_layer_str(
+    text: &str,
+    query: &LayerQuery,
+    region: Option<&str>,
+) -> Result<Vec<MapFeature>> {
+    Ok(filter_rows(
+        geojson::rows_from_str(text, query)?,
+        query,
+        region,
+    ))
+}
+
+fn filter_rows(
+    rows: Vec<(Option<String>, MapFeature)>,
+    query: &LayerQuery,
+    region: Option<&str>,
+) -> Vec<MapFeature> {
+    let region = region.filter(|_| query.filter_column.is_some());
+    rows.into_iter()
+        .filter(|(value, _)| region.is_none() || value.as_deref() == region)
+        .map(|(_, f)| f)
+        .collect()
+}
+
+#[cfg(feature = "gpkg")]
+fn read_gpkg(path: &Path, query: &LayerQuery, region: Option<&str>) -> Result<Vec<MapFeature>> {
+    crate::gpkg::read_features(path, query, region)
+}
+
+#[cfg(not(feature = "gpkg"))]
+fn read_gpkg(_: &Path, _: &LayerQuery, _: Option<&str>) -> Result<Vec<MapFeature>> {
+    Err(Error::GeoPackageUnsupported)
 }
 
 /// Distinct values of the filter column (e.g. every country code), sorted.
@@ -129,20 +157,28 @@ pub fn list_regions(path: &Path, query: &LayerQuery) -> Result<Vec<String>> {
         return Err(Error::NoFilterColumn(path.display().to_string()));
     }
     match Format::of(path)? {
-        Format::GeoPackage => gpkg::distinct_values(path, query),
+        #[cfg(feature = "gpkg")]
+        Format::GeoPackage => crate::gpkg::distinct_values(path, query),
+        #[cfg(not(feature = "gpkg"))]
+        Format::GeoPackage => Err(Error::GeoPackageUnsupported),
         Format::GeoJson => Ok(read_grouped(path, query)?.into_keys().collect()),
     }
 }
 
 /// Reads a whole GeoJSON layer grouped by filter value (for batch jobs).
 pub fn read_grouped(path: &Path, query: &LayerQuery) -> Result<BTreeMap<String, Vec<MapFeature>>> {
+    Ok(group_rows(geojson::read_rows(path, query)?))
+}
+
+/// Groups `(filter value, feature)` rows by value; rows without one are dropped.
+pub fn group_rows(rows: Vec<(Option<String>, MapFeature)>) -> BTreeMap<String, Vec<MapFeature>> {
     let mut groups: BTreeMap<String, Vec<MapFeature>> = BTreeMap::new();
-    for (value, f) in geojson::read_rows(path, query)? {
+    for (value, f) in rows {
         if let Some(v) = value {
             groups.entry(v).or_default().push(f);
         }
     }
-    Ok(groups)
+    groups
 }
 
 /// Blank values and common "no data" markers (`NA`, `-99`) count as missing.

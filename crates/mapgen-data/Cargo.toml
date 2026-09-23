@@ -12,10 +12,15 @@ authors.workspace = true
 mapgen-core.workspace = true
 geo-types.workspace = true
 thiserror.workspace = true
-rusqlite = { version = "0.37", features = ["bundled"] }
-geozero = { version = "0.14", default-features = false, features = ["with-wkb", "with-geo"] }
+rusqlite = { version = "0.37", features = ["bundled"], optional = true }
+geozero = { version = "0.14", default-features = false, features = ["with-wkb", "with-geo"], optional = true }
 geojson = { version = "0.24", features = ["geo-types"] }
-serde_json = "1"
+serde_json.workspace = true
+
+[features]
+default = ["gpkg"]
+# GeoPackage support (bundles SQLite; not available on wasm32).
+gpkg = ["dep:rusqlite", "dep:geozero"]
 
 [dev-dependencies]
 rusqlite = { version = "0.37", features = ["bundled"] }

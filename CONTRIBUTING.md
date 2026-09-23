@@ -4,8 +4,10 @@ Thanks for helping! A few ground rules keep the output reproducible:
 
 1. `cargo fmt --all && cargo clippy --workspace --all-targets && cargo test --workspace`
    must pass. CI runs these commands on Linux, macOS, and Windows.
+   For the WebAssembly crate, see `crates/mapgen-wasm/README.md` (wasm-pack, Node and
+   headless-Chrome tests, TypeScript check, native parity).
 2. **Never introduce nondeterminism** into `mapgen-core`: no `HashMap` iteration
-   in output paths, no timestamps, no locale-dependent formatting.
+   in output paths, no timestamps, no locale-dependent formatting, and no `f64::sin`/`cos`/… (use `crate::math`, backed by `libm`).
 3. If you intentionally change the SVG output, regenerate the golden files and
    review the diff:
    ```sh

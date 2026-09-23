@@ -7,6 +7,8 @@ pub enum Error {
     DegenerateExtent,
     #[error("invalid colour {0:?}")]
     InvalidColor(String),
+    #[error("unknown colour slot {0:?} (expected one of: {1})")]
+    UnknownColorSlot(String, String),
     #[error("invalid bounding box {0:?}: expected `west,south,east,north` or a preset ({1})")]
     InvalidBBox(String, String),
 }

@@ -5,6 +5,7 @@ use geo_types::{coord, LineString, MultiPolygon, Polygon, Rect};
 
 use crate::error::{Error, Result};
 use crate::feature::MapFeature;
+use crate::math::{cos, hypot};
 
 /// A WGS84 bounding box. `west > east` means it crosses the antimeridian.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -231,7 +232,7 @@ fn main_cluster(polys: &[Polygon<f64>]) -> Vec<usize> {
     for i in 0..n {
         let r = find(&mut parent, i);
         let lat = boxes[i].map_or(0.0, |b| b.center().y);
-        weight[r] += polys[i].unsigned_area() * lat.to_radians().cos().abs();
+        weight[r] += polys[i].unsigned_area() * cos(lat.to_radians()).abs();
     }
     let best = (0..n).max_by(|&a, &b| weight[a].total_cmp(&weight[b]).then(b.cmp(&a)));
     match best {
@@ -253,8 +254,8 @@ fn bbox_gap_km(a: Rect<f64>, b: Rect<f64>) -> f64 {
         })
         .fold(f64::INFINITY, f64::min);
     let lat = (a.center().y + b.center().y) / 2.0;
-    let kx = 111.2 * lat.to_radians().cos().abs().max(0.05);
-    (dlat * 111.2).hypot(dlon * kx)
+    let kx = 111.2 * cos(lat.to_radians()).abs().max(0.05);
+    hypot(dlat * 111.2, dlon * kx)
 }
 
 /// Clips a projected geometry to the frame. Geometries entirely inside are

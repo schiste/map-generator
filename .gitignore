@@ -9,3 +9,4 @@
 # local tooling
 .aethyme/
 .chau7/
+.playwright-mcp/

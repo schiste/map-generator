@@ -103,6 +103,25 @@ Other useful flags include `--width`, `--padding`, `--simplify` (px), `--min-are
 and `--attribution` / `--credit` for the data credit.
 Run `mapgen render --help` for the full list.
 
+## In the browser (WebAssembly)
+
+The same engine runs in the browser and Node.js through
+[`crates/mapgen-wasm`](crates/mapgen-wasm), with byte-identical output to the CLI
+(CI re-renders the gallery in WebAssembly and compares it with the native files).
+
+```js
+const gen = new MapGenerator();
+gen.setSubject(admin1GeoJson, { dataset: "ne-admin1" });   // parsed once
+const { svg } = gen.render({ region: "FRA", theme: "dark", colors: { water: "#123" } });
+```
+
+A playground (`crates/mapgen-wasm/www`) loads Natural Earth or your own GeoJSON
+and re-renders as you change region, theme and colours:
+
+```sh
+cd crates/mapgen-wasm && npm run build:web && npm run serve   # http://localhost:8080
+```
+
 ## Architecture
 
 | Crate | Role |
@@ -110,6 +129,7 @@ Run `mapgen render --help` for the full list.
 | [`mapgen-core`](crates/mapgen-core) | Pure pipeline, no I/O: framing, projection, antimeridian, simplification, clipping, SVG/HTML. |
 | [`mapgen-data`](crates/mapgen-data) | Readers for Natural Earth, geoBoundaries, and any GeoPackage or GeoJSON layer. |
 | [`mapgen-cli`](crates/mapgen-cli) | The `mapgen` binary. |
+| [`mapgen-wasm`](crates/mapgen-wasm) | WebAssembly/JavaScript API and browser playground. |
 
 ```
 read (SQL filter) ─► frame ─► pick projection ─► seam split ─► project

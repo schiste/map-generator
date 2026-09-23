@@ -379,18 +379,6 @@ fn options(
     })
 }
 
-/// Context layer minus the countries being mapped.
-fn context_for(
-    all: &[MapFeature],
-    subject: &[MapFeature],
-    region: Option<&str>,
-) -> Vec<MapFeature> {
-    all.iter()
-        .filter(|c| Some(c.id.as_str()) != region && !subject.iter().any(|s| s.id == c.id))
-        .cloned()
-        .collect()
-}
-
 fn is_html(format: OutputFormat, out: &Path) -> bool {
     match format {
         OutputFormat::Html => true,
@@ -429,7 +417,6 @@ fn run_render(args: RenderArgs) -> Result<()> {
         );
     }
     let (context, lakes) = args.data.load_context()?;
-    let context = context_for(&context, &subject, region.as_deref());
 
     let html = is_html(args.format, &args.out);
     let opts = options(
@@ -440,11 +427,12 @@ fn run_render(args: RenderArgs) -> Result<()> {
         args.title.clone(),
         html,
     )?;
-    let layers = MapLayers {
+    let mut layers = MapLayers {
         subject,
         context,
         lakes,
     };
+    layers.exclude_subject_from_context(region.as_deref());
     let rendered = render(&layers, &opts)?;
     let body = if html {
         to_html(&rendered.svg, &args.out, args.title.as_deref(), &opts.theme)
@@ -656,11 +644,12 @@ impl Batch<'_> {
             bail!("no features");
         }
         let args = self.args;
-        let layers = MapLayers {
-            context: context_for(&self.context, &subject, code),
+        let mut layers = MapLayers {
+            context: self.context.clone(),
             lakes: self.lakes.clone(),
             subject,
         };
+        layers.exclude_subject_from_context(code);
         let opts = options(
             &args.data,
             file,

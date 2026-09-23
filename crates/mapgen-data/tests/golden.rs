@@ -18,7 +18,7 @@ fn render_fixture() -> String {
         &fixture("twin-regions.geojson"),
         "id",
         "name",
-        "subdivision",
+        "region",
     )
     .unwrap();
     let opts = RenderOptions {

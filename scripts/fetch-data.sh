@@ -14,6 +14,9 @@
 set -euo pipefail
 
 DATA_DIR="${DATA_DIR:-data}"
+PY="$(command -v python3 || command -v python)"
+# Natural Earth GeoJSON, pinned to a commit so downloads (and docs/examples) are reproducible.
+NE_COMMIT=ca96624a56bd078437bca8184e78163e5039ad19
 mkdir -p "$DATA_DIR"
 
 fetch() {
@@ -29,7 +32,7 @@ fetch() {
 
 case "${1:-}" in
   ne-geojson)
-    base=https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson
+    base="https://raw.githubusercontent.com/nvkelso/natural-earth-vector/$NE_COMMIT/geojson"
     fetch "$base/ne_10m_admin_0_countries.geojson" "$DATA_DIR/ne_10m_admin_0.geojson"
     fetch "$base/ne_10m_admin_1_states_provinces.geojson" "$DATA_DIR/ne_10m_admin_1.geojson"
     fetch "$base/ne_10m_lakes.geojson" "$DATA_DIR/ne_10m_lakes.geojson"
@@ -48,7 +51,7 @@ case "${1:-}" in
     level="${3:?usage: $0 geoboundaries ISO3[,ISO3...]|ALL ADM0..ADM5 [--simplified]}"
     out="$DATA_DIR/geoboundaries"
     mkdir -p "$out"
-    python3 - "$out" "$isos" "$level" "${4:-}" <<'PY'
+    "$PY" - "$out" "$isos" "$level" "${4:-}" <<'PY'
 import json, os, sys, urllib.request
 
 out, isos, level, variant = sys.argv[1:5]

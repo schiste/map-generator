@@ -13,6 +13,7 @@ pub mod error;
 pub mod feature;
 pub mod frame;
 pub mod html;
+mod math;
 pub mod pipeline;
 pub mod projection;
 pub mod simplify;

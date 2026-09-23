@@ -113,6 +113,39 @@ impl Theme {
         })
     }
 
+    /// Sets a colour by slot name (`water`, `context-land`...). `earth` is
+    /// accepted for `land`, and camelCase (`contextLand`) for kebab-case.
+    pub fn set(&mut self, slot: &str, color: Color) -> Result<()> {
+        let kebab: String = slot
+            .chars()
+            .flat_map(|c| {
+                if c.is_ascii_uppercase() {
+                    vec!['-', c.to_ascii_lowercase()]
+                } else {
+                    vec![c]
+                }
+            })
+            .collect();
+        let target = match kebab.as_str() {
+            "background" => &mut self.background,
+            "water" => &mut self.water,
+            "land" | "earth" => &mut self.land,
+            "context-land" => &mut self.context_land,
+            "border" => &mut self.border,
+            "context-border" => &mut self.context_border,
+            "lake-border" => &mut self.lake_border,
+            "label" => &mut self.label,
+            _ => {
+                return Err(Error::UnknownColorSlot(
+                    slot.to_owned(),
+                    COLOR_SLOTS.join(", "),
+                ))
+            }
+        };
+        *target = color;
+        Ok(())
+    }
+
     /// `(slot name, colour)` pairs in [`COLOR_SLOTS`] order.
     pub fn colors(&self) -> [(&'static str, &Color); 8] {
         [
@@ -157,6 +190,20 @@ mod tests {
         for c in ["red;}</style><script>", "url(x)\"", "", "a{b}"] {
             assert!(Color::parse(c).is_err(), "{c}");
         }
+    }
+
+    #[test]
+    fn sets_colors_by_slot_name() {
+        let mut t = Theme::default();
+        t.set("earth", Color::parse("#111111").unwrap()).unwrap();
+        t.set("contextLand", Color::parse("#222222").unwrap())
+            .unwrap();
+        t.set("lake-border", Color::parse("#333333").unwrap())
+            .unwrap();
+        assert_eq!(t.land.as_str(), "#111111");
+        assert_eq!(t.context_land.as_str(), "#222222");
+        assert_eq!(t.lake_border.as_str(), "#333333");
+        assert!(t.set("sea", Color::parse("red").unwrap()).is_err());
     }
 
     #[test]

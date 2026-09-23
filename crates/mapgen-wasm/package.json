@@ -1,0 +1,17 @@
+{
+  "name": "mapgen-wasm-dev",
+  "private": true,
+  "description": "Build and test scripts for the mapgen-wasm package (the published package is generated into pkg/).",
+  "type": "module",
+  "scripts": {
+    "build:node": "wasm-pack build --release --target nodejs --out-dir pkg/node",
+    "build:web": "wasm-pack build --release --target web --out-dir www/pkg",
+    "build": "npm run build:node && npm run build:web",
+    "test": "node --test js-tests/*.test.mjs",
+    "serve": "python3 -m http.server --directory www 8080",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

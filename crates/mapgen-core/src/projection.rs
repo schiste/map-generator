@@ -1,4 +1,5 @@
 use crate::antimeridian::wrap_longitude;
+use crate::math::{asin, cos, sin};
 
 /// Authalic (equal-area) radius of the WGS84 ellipsoid, in metres.
 pub const AUTHALIC_RADIUS_M: f64 = 6_371_007.181;
@@ -33,13 +34,12 @@ impl Projection for LambertAzimuthalEqualArea {
     fn project(&self, lon: f64, lat: f64) -> (f64, f64) {
         let dlon = wrap_longitude(lon - self.lon0).to_radians();
         let (phi, phi0) = (lat.to_radians(), self.lat0.to_radians());
-        let denom = 1.0 + phi0.sin() * phi.sin() + phi0.cos() * phi.cos() * dlon.cos();
+        let denom = 1.0 + sin(phi0) * sin(phi) + cos(phi0) * cos(phi) * cos(dlon);
         // `denom` is 0 only at the antipode of the centre, which never lies
         // inside a region whose centre was chosen from its own extent.
         let k = (2.0 / denom.max(f64::EPSILON)).sqrt();
-        let x = AUTHALIC_RADIUS_M * k * phi.cos() * dlon.sin();
-        let y =
-            AUTHALIC_RADIUS_M * k * (phi0.cos() * phi.sin() - phi0.sin() * phi.cos() * dlon.cos());
+        let x = AUTHALIC_RADIUS_M * k * cos(phi) * sin(dlon);
+        let y = AUTHALIC_RADIUS_M * k * (cos(phi0) * sin(phi) - sin(phi0) * cos(phi) * cos(dlon));
         (x, y)
     }
 }
@@ -69,10 +69,10 @@ impl Projection for EqualEarth {
         };
         let lam = dlon.to_radians();
         let m = 3f64.sqrt() / 2.0;
-        let theta = (m * lat.to_radians().sin()).asin();
+        let theta = asin(m * sin(lat.to_radians()));
         let t2 = theta * theta;
         let t6 = t2 * t2 * t2;
-        let x = AUTHALIC_RADIUS_M * 2.0 * 3f64.sqrt() * lam * theta.cos()
+        let x = AUTHALIC_RADIUS_M * 2.0 * 3f64.sqrt() * lam * cos(theta)
             / (3.0 * (9.0 * A4 * t6 * t2 + 7.0 * A3 * t6 + 3.0 * A2 * t2 + A1));
         let y = AUTHALIC_RADIUS_M * theta * (A1 + A2 * t2 + t6 * (A3 + A4 * t2));
         (x, y)

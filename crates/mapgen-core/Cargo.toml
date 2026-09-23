@@ -12,3 +12,4 @@ authors.workspace = true
 geo.workspace = true
 geo-types.workspace = true
 thiserror.workspace = true
+libm.workspace = true

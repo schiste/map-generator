@@ -1,11 +1,17 @@
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[cfg(feature = "gpkg")]
     #[error("sqlite: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[cfg(feature = "gpkg")]
     #[error("geometry decoding: {0}")]
     Geometry(#[from] geozero::error::GeozeroError),
+    #[error("GeoPackage support is not compiled in (enable the `gpkg` feature)")]
+    GeoPackageUnsupported,
     #[error("geojson: {0}")]
     GeoJson(Box<::geojson::Error>),
+    #[error("invalid GeoJSON: {0}")]
+    Json(#[from] serde_json::Error),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
     #[error("invalid SQL identifier {0:?}")]

@@ -12,8 +12,25 @@ use crate::layer::{meaningful, LayerQuery};
 /// rows, sorted by id. Property names are matched case-insensitively; ids
 /// fall back to the feature `id`, then the name, then the feature's index.
 pub fn read_rows(path: &Path, query: &LayerQuery) -> Result<Vec<(Option<String>, MapFeature)>> {
-    let text = std::fs::read_to_string(path)?;
-    let collection: ::geojson::FeatureCollection = text.parse()?;
+    rows_from_str(&std::fs::read_to_string(path)?, query)
+}
+
+/// [`read_rows`] for GeoJSON text already in memory. Accepts a
+/// `FeatureCollection`, a single `Feature`, or a bare geometry.
+pub fn rows_from_str(text: &str, query: &LayerQuery) -> Result<Vec<(Option<String>, MapFeature)>> {
+    let collection = match text.parse::<::geojson::GeoJson>()? {
+        ::geojson::GeoJson::FeatureCollection(fc) => fc,
+        ::geojson::GeoJson::Feature(f) => ::geojson::FeatureCollection {
+            bbox: None,
+            features: vec![f],
+            foreign_members: None,
+        },
+        ::geojson::GeoJson::Geometry(g) => ::geojson::FeatureCollection {
+            bbox: None,
+            features: vec![::geojson::Feature::from(g)],
+            foreign_members: None,
+        },
+    };
 
     let mut rows = Vec::new();
     for (i, f) in collection.features.into_iter().enumerate() {

@@ -1,5 +1,6 @@
 //! Reads a tiny GeoPackage built on the fly, so the SQL path is tested
 //! without downloading any dataset.
+#![cfg(feature = "gpkg")]
 
 use std::path::PathBuf;
 

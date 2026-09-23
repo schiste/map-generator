@@ -3,7 +3,11 @@
 ## Principles
 
 1. **Pure core.** `mapgen-core` does no I/O: `render(layers, options) → Rendered`.
-2. **Determinism.** Layers are sorted by id, hash maps are used only for lookups (never
+2. **Determinism.** Trigonometry goes through the pure-Rust `libm` crate (`math.rs`) rather
+   than the platform's math library, whose last bits differ between macOS, glibc, MSVC and
+   WebAssembly. With that, output is byte-identical on every OS and in the browser; CI checks
+   the gallery on Linux, macOS, Windows and WebAssembly.
+   Also, layers are sorted by id, hash maps are used only for lookups (never
    iterated into output), and numbers are printed at a fixed precision with trailing zeros
    stripped (`svg::fmt_num`). Golden tests and `scripts/build-examples.sh` enforce this.
 3. **Load only what you draw.** GeoPackage filters run in SQL and rows are streamed.
