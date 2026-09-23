@@ -58,6 +58,11 @@ pub fn read_features_in(
         }
     }
     select.push(ident(&geom_col)?);
+    // Names in other languages, after the geometry.
+    let languages = query.language_columns();
+    for (_, c) in &languages {
+        select.push(if has(c) { ident(c)? } else { "NULL".into() });
+    }
 
     let mut sql = format!("SELECT {} FROM {}", select.join(", "), ident(table)?);
     let mut conditions: Vec<String> = Vec::new();
@@ -115,9 +120,16 @@ pub fn read_features_in(
         let Some(id) = id.or_else(|| name.clone()) else {
             continue;
         };
+        let mut names = std::collections::BTreeMap::new();
+        for (k, (lang, _)) in languages.iter().enumerate() {
+            if let Some(v) = meaningful(value_to_string(row.get(n + 6 + k)?)) {
+                names.insert(lang.clone(), v);
+            }
+        }
         let geometry = into_multipolygon(GpkgWkb(blob).to_geo()?);
         features.push(MapFeature {
             name: name.unwrap_or_else(|| id.clone()),
+            names,
             id,
             class: query.class.clone(),
             parent,

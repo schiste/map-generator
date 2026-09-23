@@ -87,6 +87,19 @@ pub(crate) struct InputArgs {
     #[arg(long)]
     name_column: Option<String>,
 
+    /// Also label in these languages (BCP 47 tags, e.g. `fr,ar,zh-Hans,zh-Hant`):
+    /// each language's labels are placed separately, and viewers pick theirs
+    /// through `<switch>`/`systemLanguage` (Wikimedia Commons' `lang=`).
+    /// Needs --labels.
+    #[arg(long, value_delimiter = ',')]
+    languages: Vec<String>,
+
+    /// Column/property with names in other languages, `{lang}` standing for
+    /// the language (preset: `NAME_{lang}`/`name_{lang}` for Natural Earth,
+    /// with `zht` for traditional Chinese).
+    #[arg(long)]
+    name_language_column: Option<String>,
+
     /// Column/property that --region is compared against.
     #[arg(long)]
     filter_column: Option<String>,
@@ -205,6 +218,10 @@ impl InputArgs {
         if let Some(c) = &self.country_column {
             q.country_column = Some(c.clone());
         }
+        if let Some(c) = &self.name_language_column {
+            q.name_language_column = Some(c.clone());
+        }
+        q.languages = self.languages.clone();
         q
     }
 
@@ -746,6 +763,16 @@ fn options(
     title: Option<String>,
     html: bool,
 ) -> Result<RenderOptions> {
+    if !input.languages.is_empty() {
+        if !style.labels {
+            bail!("--languages labels the map in several languages: add --labels");
+        }
+        if input.query().name_language_column.is_none() {
+            bail!(
+                "--languages needs --name-language-column (e.g. `name_{{lang}}`) for this dataset"
+            );
+        }
+    }
     let frame = match (&layout.bbox, layout.frame) {
         (Some(b), _) => FrameMode::BBox(GeoBBox::parse(b)?),
         (None, FrameArg::Auto) => FrameMode::Auto,
@@ -770,6 +797,7 @@ fn options(
         theme: style.theme(),
         css_vars: style.css_vars || html,
         labels: style.labels,
+        languages: input.languages.clone(),
         border_mode: match style.border_mode {
             BorderModeArg::Layer => BorderMode::Layer,
             BorderModeArg::Regions => BorderMode::Regions,

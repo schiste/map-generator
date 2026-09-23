@@ -161,6 +161,8 @@ pub fn dissolve(features: Vec<MapFeature>, rows: &[UnitRow]) -> Vec<MapFeature> 
             name: names
                 .get(unit.as_str())
                 .map_or_else(|| unit.clone(), |n| n.to_string()),
+            // Unit names come from the table, in one language.
+            names: BTreeMap::new(),
             class: members[0].class.clone(),
             parent: same(|m| &m.parent),
             parent_name: same(|m| &m.parent_name),

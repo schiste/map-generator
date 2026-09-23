@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use geo_types::{MultiLineString, MultiPolygon};
 
 /// A single administrative area ready to be rendered.
@@ -10,6 +12,9 @@ pub struct MapFeature {
     pub id: String,
     /// Human-readable name, emitted as `data-name` and a `<title>` child.
     pub name: String,
+    /// Names in other languages, by BCP 47 tag (`fr`, `zh-Hant`), for
+    /// multilingual labels (see `RenderOptions::languages`).
+    pub names: BTreeMap<String, String>,
     /// CSS class, e.g. `country` or `subdivision`.
     pub class: String,
     /// Code of the enclosing unit (e.g. the région of a département). Borders
@@ -30,6 +35,7 @@ impl Default for MapFeature {
         MapFeature {
             id: String::new(),
             name: String::new(),
+            names: BTreeMap::new(),
             class: String::new(),
             parent: None,
             parent_name: None,

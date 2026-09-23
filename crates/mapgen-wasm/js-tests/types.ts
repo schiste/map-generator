@@ -18,6 +18,8 @@ const splitUnits: [string, number][] | undefined = gen.render({ dissolve: true }
 gen.setSubject("{}", { dataset: "ne-admin0", worldview: "IND" });
 gen.setSubject("{}", { dataset: "geoboundaries", parentProperty: "parent" });
 gen.setSubject("{}", { parentNameProperty: "state", countryProperty: "iso3" });
+gen.setSubject("{}", { dataset: "ne-admin1", languages: ["fr", "zh-Hant"], nameLanguageProperty: "name_{lang}" });
+gen.render({ labels: true, languages: ["fr", "zh-Hant"] });
 
 const out: MapOutput = gen.render();
 const svg: string = out.svg;

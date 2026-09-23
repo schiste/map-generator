@@ -203,14 +203,7 @@ fn write_panel(
         vp,
         p,
     );
-    write_labels(
-        out,
-        ids,
-        &group("labels"),
-        &panel.labels,
-        &panel.subject,
-        doc.theme.label_size,
-    );
+    write_labels(out, ids, &group("labels"), panel, doc.theme.label_size);
     if let Some(b) = panel.inset_box {
         let _ = writeln!(
             out,
@@ -397,74 +390,150 @@ fn write_labels(
     out: &mut String,
     ids: &mut HashSet<String>,
     group: &str,
-    labels: &[Label],
-    subject: &[MapFeature],
+    panel: &Panel,
     nominal: f64,
 ) {
-    if labels.is_empty() {
+    let (labels, subject) = (&panel.labels, &panel.subject);
+    if labels.is_empty() && panel.translations.iter().all(|(_, t)| t.is_empty()) {
         return;
     }
     let _ = writeln!(out, "<g {group}>");
-    for l in labels {
-        // The stylesheet sets the nominal size; shrunk labels override it.
-        let style = if (l.size - nominal).abs() > 1e-9 {
-            format!(" style=\"font-size:{}px\"", fmt_num(l.size, 2))
-        } else {
-            String::new()
-        };
-        let text = escape(&l.text);
-        match &l.shape {
-            LabelShape::Straight => {
-                let _ = writeln!(
-                    out,
-                    "<text class=\"mg-label\" x=\"{}\" y=\"{}\"{style}>{text}</text>",
-                    fmt_num(l.x, 1),
-                    fmt_num(l.y, 1)
-                );
-            }
-            LabelShape::Leader { anchor, end } => {
-                let _ = writeln!(
-                    out,
-                    "<path class=\"mg-leader\" d=\"M{} {}L{} {}\"/>",
-                    fmt_num(anchor.0, 1),
-                    fmt_num(anchor.1, 1),
-                    fmt_num(end.0, 1),
-                    fmt_num(end.1, 1)
-                );
-                let _ = writeln!(
-                    out,
-                    "<text class=\"mg-label\" x=\"{}\" y=\"{}\"{style}>{text}</text>",
-                    fmt_num(l.x, 1),
-                    fmt_num(l.y, 1)
-                );
-            }
-            LabelShape::Curved { path } => {
-                let base = subject.get(l.feature).map_or("label", |f| f.id.as_str());
-                let id = unique_id(ids, &format!("label-path-{base}"));
-                let mut d = String::new();
-                for (i, (x, y)) in path.iter().enumerate() {
-                    let _ = write!(
-                        d,
-                        "{}{} {}",
-                        if i == 0 { "M" } else { "L" },
-                        fmt_num(*x, 1),
-                        fmt_num(*y, 1)
-                    );
-                }
-                let _ = writeln!(
-                    out,
-                    "<path id=\"{}\" fill=\"none\" d=\"{d}\"/>",
-                    escape(&id)
-                );
-                let _ = writeln!(
-                    out,
-                    "<text class=\"mg-label\"{style}><textPath href=\"#{}\" startOffset=\"50%\">{text}</textPath></text>",
-                    escape(&id)
-                );
+    if panel.translations.is_empty() {
+        for l in labels {
+            for e in label_elements(ids, l, subject, nominal, None) {
+                let _ = writeln!(out, "{e}");
             }
         }
+        out.push_str("</g>\n");
+        return;
+    }
+    // One `<switch>` per region whose label differs in some language; a
+    // language whose label didn't fit gets an empty group, so it never falls
+    // back to a label placed for another language's layout.
+    let find = |ls: &[Label], i: usize| ls.iter().find(|l| l.feature == i).cloned();
+    let mut features: Vec<usize> = labels
+        .iter()
+        .chain(panel.translations.iter().flat_map(|(_, t)| t))
+        .map(|l| l.feature)
+        .collect();
+    features.sort_unstable();
+    features.dedup();
+    for i in features {
+        let default = find(labels, i);
+        let variants: Vec<(&str, Option<Label>)> = panel
+            .translations
+            .iter()
+            .map(|(lang, ls)| (lang.as_str(), find(ls, i)))
+            .filter(|(_, l)| *l != default)
+            .collect();
+        if variants.is_empty() {
+            for e in default
+                .iter()
+                .flat_map(|l| label_elements(ids, l, subject, nominal, None))
+            {
+                let _ = writeln!(out, "{e}");
+            }
+            continue;
+        }
+        out.push_str("<switch>\n");
+        for (lang, l) in variants {
+            let attr = format!(" systemLanguage=\"{}\"", escape(lang));
+            match l {
+                None => {
+                    let _ = writeln!(out, "<g{attr}/>");
+                }
+                Some(l) => write_alternative(
+                    out,
+                    &attr,
+                    label_elements(ids, &l, subject, nominal, Some(lang)),
+                ),
+            }
+        }
+        if let Some(l) = default {
+            write_alternative(out, "", label_elements(ids, &l, subject, nominal, None));
+        }
+        out.push_str("</switch>\n");
     }
     out.push_str("</g>\n");
+}
+
+/// One child of a `<switch>`: a single element carries `attr` itself,
+/// several are grouped (a switch renders only its first matching child).
+fn write_alternative(out: &mut String, attr: &str, elements: Vec<String>) {
+    match elements.as_slice() {
+        [one] => {
+            let tag_end = one.find([' ', '>']).unwrap_or(one.len());
+            let _ = writeln!(out, "{}{attr}{}", &one[..tag_end], &one[tag_end..]);
+        }
+        many => {
+            let _ = writeln!(out, "<g{attr}>");
+            for e in many {
+                let _ = writeln!(out, "{e}");
+            }
+            out.push_str("</g>\n");
+        }
+    }
+}
+
+/// The SVG elements of one label.
+fn label_elements(
+    ids: &mut HashSet<String>,
+    l: &Label,
+    subject: &[MapFeature],
+    nominal: f64,
+    lang: Option<&str>,
+) -> Vec<String> {
+    // The stylesheet sets the nominal size; shrunk labels override it.
+    let style = if (l.size - nominal).abs() > 1e-9 {
+        format!(" style=\"font-size:{}px\"", fmt_num(l.size, 2))
+    } else {
+        String::new()
+    };
+    let text = escape(&l.text);
+    let straight = || {
+        format!(
+            "<text class=\"mg-label\" x=\"{}\" y=\"{}\"{style}>{text}</text>",
+            fmt_num(l.x, 1),
+            fmt_num(l.y, 1)
+        )
+    };
+    match &l.shape {
+        LabelShape::Straight => vec![straight()],
+        LabelShape::Leader { anchor, end } => vec![
+            format!(
+                "<path class=\"mg-leader\" d=\"M{} {}L{} {}\"/>",
+                fmt_num(anchor.0, 1),
+                fmt_num(anchor.1, 1),
+                fmt_num(end.0, 1),
+                fmt_num(end.1, 1)
+            ),
+            straight(),
+        ],
+        LabelShape::Curved { path } => {
+            let base = subject.get(l.feature).map_or("label", |f| f.id.as_str());
+            let raw = match lang {
+                Some(lang) => format!("label-path-{base}-{lang}"),
+                None => format!("label-path-{base}"),
+            };
+            let id = escape(&unique_id(ids, &raw));
+            let mut d = String::new();
+            for (i, (x, y)) in path.iter().enumerate() {
+                let _ = write!(
+                    d,
+                    "{}{} {}",
+                    if i == 0 { "M" } else { "L" },
+                    fmt_num(*x, 1),
+                    fmt_num(*y, 1)
+                );
+            }
+            vec![
+                format!("<path id=\"{id}\" fill=\"none\" d=\"{d}\"/>"),
+                format!(
+                    "<text class=\"mg-label\"{style}><textPath href=\"#{id}\" startOffset=\"50%\">{text}</textPath></text>"
+                ),
+            ]
+        }
+    }
 }
 
 /// Makes a valid, unique XML id: invalid characters become `_`, ids that

@@ -41,6 +41,10 @@ export interface LayerSpec {
   parentNameProperty?: string;
   /** Property with the country (ISO alpha-2 or alpha-3), emitted as a lowercase alpha-2 class (Maphue). */
   countryProperty?: string;
+  /** Languages to read names in (BCP 47 tags, e.g. ["fr", "zh-Hant"]), for RenderSpec.languages. */
+  languages?: string[];
+  /** Property with names in other languages, "{lang}" standing for the language (Natural Earth: "NAME_{lang}"). */
+  nameLanguageProperty?: string;
   /** Data credit for this layer (Natural Earth presets default to "Natural Earth (de facto view)"). */
   attribution?: string;
   /** For Natural Earth point-of-view files: the view, named in the credit ("IND"). */
@@ -80,6 +84,8 @@ export interface RenderSpec {
   disputedBorderWidth?: number;
   labelSize?: number;
   labels?: boolean;
+  /** Also label in these languages (read with LayerSpec.languages): a <switch> on systemLanguage per label. */
+  languages?: string[];
   /** "layer" (default): borders drawn once, by kind; "regions": each region strokes its outline. */
   borderMode?: "layer" | "regions";
   /** Label small regions outside them with a leader line (default true). */

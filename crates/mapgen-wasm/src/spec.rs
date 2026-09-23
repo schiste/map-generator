@@ -65,6 +65,12 @@ pub struct LayerSpec {
     /// Property with the country (ISO 3166-1 alpha-2 or alpha-3), emitted as
     /// a lowercase alpha-2 class for colouring tools like Maphue.
     pub country_property: Option<String>,
+    /// Languages to read names in (BCP 47 tags), for `RenderSpec.languages`.
+    #[serde(default)]
+    pub languages: Vec<String>,
+    /// Property with names in other languages, `{lang}` standing for the
+    /// language (Natural Earth presets: `NAME_{lang}` / `name_{lang}`).
+    pub name_language_property: Option<String>,
     /// Data credit for this layer. Natural Earth presets default to
     /// "Natural Earth (de facto view)"; for geoBoundaries, pass the source
     /// and licence.
@@ -116,6 +122,10 @@ impl LayerSpec {
         if let Some(p) = &self.country_property {
             q.country_column = Some(p.clone());
         }
+        if let Some(p) = &self.name_language_property {
+            q.name_language_column = Some(p.clone());
+        }
+        q.languages = self.languages.clone();
         q
     }
 }
@@ -308,6 +318,10 @@ pub struct RenderSpec {
     pub label_size: Option<f64>,
     #[serde(default)]
     pub labels: bool,
+    /// Also label in these languages (read with `LayerSpec.languages`), in a
+    /// `<switch>` on `systemLanguage`.
+    #[serde(default)]
+    pub languages: Vec<String>,
     /// `layer` (default): borders drawn once in their own layer; `regions`:
     /// each region strokes its own outline.
     #[serde(default)]
@@ -392,6 +406,7 @@ impl RenderSpec {
             theme,
             css_vars: self.css_vars || self.format == Format::Html,
             labels: self.labels,
+            languages: self.languages.clone(),
             border_mode: match self.border_mode {
                 Borders::Layer => BorderMode::Layer,
                 Borders::Regions => BorderMode::Regions,

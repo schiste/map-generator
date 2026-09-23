@@ -70,6 +70,8 @@ pub struct Panel {
     pub borders: Vec<(BorderKind, MultiLineString<f64>)>,
     /// In pixels.
     pub labels: Vec<Label>,
+    /// Labels per extra language, placed independently of each other.
+    pub translations: Vec<(String, Vec<Label>)>,
     /// For insets: the box, in pixels.
     pub inset_box: Option<Rect<f64>>,
     pub projection: MapProjection,
@@ -369,7 +371,7 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
     disputed_areas.retain(|f| !f.geometry.0.is_empty());
 
     // 7. Labels, in pixels.
-    let labels = if opts.labels {
+    let (labels, translations) = if opts.labels {
         let px: Vec<MultiPolygon<f64>> = subject
             .iter()
             .map(|f| {
@@ -379,11 +381,16 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
                 })
             })
             .collect();
-        let regions: Vec<(&str, &MultiPolygon<f64>)> = subject
-            .iter()
-            .zip(&px)
-            .map(|(f, g)| (f.name.as_str(), g))
-            .collect();
+        let regions_in = |lang: Option<&str>| -> Vec<(&str, &MultiPolygon<f64>)> {
+            subject
+                .iter()
+                .zip(&px)
+                .map(|(f, g)| {
+                    let name = lang.and_then(|l| f.names.get(l)).unwrap_or(&f.name);
+                    (name.as_str(), g)
+                })
+                .collect()
+        };
         let bounds = match placement {
             Placement::Canvas { width, .. } => [0.0, 0.0, f64::from(width), viewport.canvas_height],
             Placement::Box(b) => [b.min().x, b.min().y, b.max().x, b.max().y],
@@ -394,9 +401,20 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
             leaders: opts.label_leaders,
             curved: opts.label_curved,
         };
-        place_labels(&regions, bounds, &label_opts)
+        let translations = opts
+            .languages
+            .iter()
+            .map(|l| {
+                let placed = place_labels(&regions_in(Some(l)), bounds, &label_opts);
+                (l.clone(), placed)
+            })
+            .collect();
+        (
+            place_labels(&regions_in(None), bounds, &label_opts),
+            translations,
+        )
     } else {
-        Vec::new()
+        (Vec::new(), Vec::new())
     };
 
     Ok(Panel {
@@ -408,6 +426,7 @@ pub(crate) fn build_panel(spec: PanelSpec) -> Result<Panel> {
         disputed_areas,
         borders,
         labels,
+        translations,
         inset_box: match placement {
             Placement::Box(b) => Some(b),
             Placement::Canvas { .. } => None,

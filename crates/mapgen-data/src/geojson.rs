@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use geo_types::Geometry;
@@ -12,6 +13,7 @@ use crate::layer::{meaningful, LayerQuery};
 struct RawFeature {
     id: String,
     name: Option<String>,
+    names: BTreeMap<String, String>,
     filter: Option<String>,
     parent: Option<String>,
     parent_name: Option<String>,
@@ -34,6 +36,7 @@ pub fn rows_from_str(text: &str, query: &LayerQuery) -> Result<Vec<(Option<Strin
         .map(|r| {
             let feature = MapFeature {
                 name: r.name.unwrap_or_else(|| r.id.clone()),
+                names: r.names,
                 id: r.id,
                 class: query.class.clone(),
                 // A parent's name means nothing without its code (Natural
@@ -133,6 +136,7 @@ pub fn records_from_str(text: &str) -> Result<Vec<Record>> {
 }
 
 fn raw_features(text: &str, query: &LayerQuery) -> Result<Vec<RawFeature>> {
+    let languages = query.language_columns();
     Ok(records_from_str(text)?
         .into_iter()
         .enumerate()
@@ -154,6 +158,10 @@ fn raw_features(text: &str, query: &LayerQuery) -> Result<Vec<RawFeature>> {
                 parent: query.parent_column.as_deref().and_then(|c| r.prop(c)),
                 parent_name: query.parent_name_column.as_deref().and_then(|c| r.prop(c)),
                 country: query.country_column.as_deref().and_then(|c| r.prop(c)),
+                names: languages
+                    .iter()
+                    .filter_map(|(lang, c)| r.prop(c).map(|n| (lang.clone(), n)))
+                    .collect(),
                 name,
                 id,
                 geometry: r.geometry,

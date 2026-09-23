@@ -95,6 +95,10 @@ pub struct RenderOptions {
     /// Emit `var(--mg-*, …)` colours for restyling from page CSS.
     pub css_vars: bool,
     pub labels: bool,
+    /// Also label in these languages (BCP 47 tags, from `MapFeature::names`):
+    /// labels are placed separately per language and emitted in a
+    /// `<switch>` on `systemLanguage`, with `name` as the fallback.
+    pub languages: Vec<String>,
     pub border_mode: BorderMode,
     /// Place labels of small regions outside them, with a leader line.
     pub label_leaders: bool,
@@ -136,6 +140,7 @@ impl Default for RenderOptions {
             theme: Theme::default(),
             css_vars: false,
             labels: false,
+            languages: Vec::new(),
             border_mode: BorderMode::Layer,
             label_leaders: true,
             label_curved: true,

@@ -102,3 +102,64 @@ fn layers_are_in_paint_order() {
     assert!(pos("id=\"background\"") < pos("id=\"water\""));
     assert!(pos("id=\"water\"") < pos("<g id=\"land\">"));
 }
+
+#[test]
+fn labels_switch_on_system_language() {
+    let text = r#"{"type":"FeatureCollection","features":[
+      {"type":"Feature","properties":{"id":"XA-01","name":"Westland","name_fr":"Ouestland",
+        "name_zht":"西地","name_de":"Ein sehr sehr langer westlicher Landesname"},
+       "geometry":{"type":"Polygon","coordinates":[[[9,45],[10,45],[10,46],[9,46],[9,45]]]}},
+      {"type":"Feature","properties":{"id":"XA-02","name":"Eastland","name_fr":"Eastland"},
+       "geometry":{"type":"Polygon","coordinates":[[[10,45],[11,45],[11,46],[10,46],[10,45]]]}}]}"#;
+    let query = mapgen_data::LayerQuery {
+        id_columns: vec!["id".into()],
+        name_column: "name".into(),
+        name_language_column: Some("name_{lang}".into()),
+        languages: vec!["fr".into(), "de".into(), "zh-Hant".into()],
+        class: "region".into(),
+        ..mapgen_data::LayerQuery::default()
+    };
+    let subject: Vec<_> = mapgen_data::geojson::rows_from_str(text, &query)
+        .unwrap()
+        .into_iter()
+        .map(|(_, f)| f)
+        .collect();
+    assert_eq!(subject[0].names["zh-Hant"], "西地");
+    let opts = RenderOptions {
+        width: 300,
+        labels: true,
+        languages: query.languages.clone(),
+        ..RenderOptions::default()
+    };
+    let layers = MapLayers {
+        subject,
+        ..MapLayers::default()
+    };
+    let svg = render(&layers, &opts).unwrap().svg;
+    // Westland differs in French and Chinese; the German name doesn't fit,
+    // so German viewers get no label rather than one placed for another
+    // layout. Eastland is the same everywhere: no switch.
+    let westland = svg
+        .split("<switch>")
+        .nth(1)
+        .unwrap()
+        .split("</switch>")
+        .next()
+        .unwrap();
+    let lines: Vec<&str> = westland.trim().lines().collect();
+    assert_eq!(lines.len(), 4, "{westland}");
+    assert!(
+        lines[0].starts_with("<text systemLanguage=\"fr\" class=\"mg-label\"")
+            && lines[0].ends_with(">Ouestland</text>")
+    );
+    assert_eq!(lines[1], "<g systemLanguage=\"de\"/>");
+    assert!(
+        lines[2].starts_with("<text systemLanguage=\"zh-Hant\"")
+            && lines[2].ends_with(">西地</text>")
+    );
+    assert!(
+        lines[3].starts_with("<text class=\"mg-label\"") && lines[3].ends_with(">Westland</text>")
+    );
+    assert_eq!(svg.matches("<switch>").count(), 1);
+    assert_eq!(svg.matches(">Eastland</text>").count(), 1);
+}

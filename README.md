@@ -37,6 +37,7 @@ colour the map by country, neighbours included.
 - **Antimeridian-safe.** Fiji, Russia and Kiribati are centred correctly, and datasets' artificial 180° cuts (Taveuni) are never drawn as borders.
 - **Insets.** Far-away parts (Alaska, Hawaii, Puerto Rico, French overseas départements) go in corner boxes, sized by area and placed where they cover the least of the map.
 - **Labels that fit.** Placed at each region's visual centre, shrunk to fit, curved along long thin shapes (Chile), or outside small regions with a leader line where that covers no other region.
+- **Multilingual.** `--languages fr,ar,zh-Hans,zh-Hant` labels one file in several languages from Natural Earth's names: each language is placed separately (names differ in length), and viewers get theirs through SVG `<switch>`/`systemLanguage`, as Wikimedia Commons' `lang=` does.
 - **Two datasets, one border.** Neighbouring countries from one dataset are snapped onto the outline of regions from another, closing gaps and doubled borders.
 - **Easy restyling.** Four themes plus a flag for every colour. Colours live in one `<style>` block, can be emitted as CSS custom properties, and `.html` output adds live colour pickers.
 - **Data tools.** `mapgen convert` writes indexed GeoPackages (3–4× faster renders) and borrows readable ids (ISO 3166-2, FIPS) by spatial overlap; `mapgen check` finds invalid polygons, slivers, overlaps and near-miss borders, and `--repair` fixes what it safely can. `mapgen match` reports data codes a map lacks (usually data and boundaries from different years), and `mapgen reshape` moves data to new codes through a crosswalk: renames and merges automatically, splits by weight, and anything ambiguous listed for a decision.
@@ -103,6 +104,11 @@ mapgen render -i usa-counties.gpkg --dataset geoboundaries --credit -o usa.svg  
 #   --parent-names data/us-states.txt --parent-names-key STATE --parent-names-column STATE_NAME
 # Sources without codes: assign them from a table (CSV, TSV or pipe-separated)
 #   --codes-from codes.csv --codes-key name --codes-column fips [--codes-parent-column state]
+
+# Labels in several languages, one file (Natural Earth names; --name-language-column
+# name_{lang} for other sources). Commons: [[File:Map.svg|lang=fr]]
+mapgen render -i data/ne_10m_admin_1.geojson --dataset ne-admin1 --region FRA --labels \
+    --languages fr,ar,zh-Hans,zh-Hant -o france.svg
 
 # Projections
 mapgen render … --projection albers --parallels 29.5,45.5
@@ -206,6 +212,7 @@ same licence). No dataset is vendored in this repository. See
 ## Known limitations and roadmap
 
 - Drawing every border once, as its own layer, makes files about 1.5–2.5× larger than stroking each region's outline (every coordinate appears in a fill and in a border). `--border-mode regions` gives the per-region strokes back (e.g. France: 218 KB instead of 347 KB), with each region self-contained for hover highlighting, but shared borders drawn twice and no coast/land-border distinction.
+- Multilingual labels: Wikimedia's renderer (librsvg) matches `systemLanguage` on the language subtag only, so `zh-Hans` and `zh-Hant` can't both be picked from one file there (the first listed wins); browsers tell them apart.
 - Labels that fit nowhere, even with a leader line, are dropped (e.g. the small départements around Paris). Label widths are estimated, not measured from a font.
 - `--repair` reliably removes repeated vertices and degenerate rings and rebuilds invalid polygons; snapping near-miss borders is kept only when it reduces them, which on high-resolution geoBoundaries data is rarely the case.
 - EPSG projections (`proj` feature) use the platform's math library, so unlike the built-in projections they are deterministic per platform but not guaranteed identical across platforms.

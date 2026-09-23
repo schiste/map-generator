@@ -27,8 +27,37 @@ pub struct LayerQuery {
     /// Column with a note appended to the name ("Jammu and Kashmir — Admin.
     /// by India; Claimed by Pakistan").
     pub note_column: Option<String>,
+    /// Column holding the name in another language, with `{lang}` standing
+    /// for the language (`NAME_{lang}` → `NAME_fr`; see [`language_column`]).
+    pub name_language_column: Option<String>,
+    /// Languages (BCP 47 tags) to read names in, into `MapFeature::names`.
+    pub languages: Vec<String>,
     /// CSS class emitted on each path.
     pub class: String,
+}
+
+impl LayerQuery {
+    /// `(language tag, column)` for each requested language.
+    pub fn language_columns(&self) -> Vec<(String, String)> {
+        let Some(pattern) = &self.name_language_column else {
+            return Vec::new();
+        };
+        self.languages
+            .iter()
+            .map(|l| (l.clone(), language_column(pattern, l)))
+            .collect()
+    }
+}
+
+/// The column for a language: `{lang}` in `pattern` becomes the tag's
+/// language subtag, or Natural Earth's `zht` for traditional Chinese
+/// (`zh-Hant`, `zh-TW`, `zh-HK`, `zh-MO`).
+pub fn language_column(pattern: &str, tag: &str) -> String {
+    let tag = tag.to_ascii_lowercase();
+    let mut subtags = tag.split(['-', '_']);
+    let primary = subtags.next().unwrap_or_default();
+    let traditional = primary == "zh" && subtags.any(|s| matches!(s, "hant" | "tw" | "hk" | "mo"));
+    pattern.replace("{lang}", if traditional { "zht" } else { primary })
 }
 
 /// Well-known layouts of the supported datasets.
@@ -111,6 +140,7 @@ impl Source {
             // `ISO_A2_EH` fills in France's and Norway's codes, which `ISO_A2` lacks.
             Source::NaturalEarthAdmin0 => LayerQuery {
                 country_column: Some("ISO_A2_EH".into()),
+                name_language_column: Some("NAME_{lang}".into()),
                 ..q(
                     "ne_10m_admin_0_countries".into(),
                     &["ADM0_A3"],
@@ -124,6 +154,7 @@ impl Source {
                 parent_column: Some("region_cod".into()),
                 parent_name_column: Some("region".into()),
                 country_column: Some("iso_a2".into()),
+                name_language_column: Some("name_{lang}".into()),
                 ..q(
                     "ne_10m_admin_1_states_provinces".into(),
                     &["iso_3166_2", "adm1_code"],
@@ -293,4 +324,19 @@ pub fn group_rows(rows: Vec<(Option<String>, MapFeature)>) -> BTreeMap<String, V
 pub(crate) fn meaningful(v: Option<String>) -> Option<String> {
     v.map(|s| s.trim().to_owned())
         .filter(|s| !s.is_empty() && s != "NA" && s != "-99")
+}
+
+#[cfg(test)]
+mod language_tests {
+    use super::language_column;
+
+    #[test]
+    fn language_columns_follow_natural_earth() {
+        assert_eq!(language_column("NAME_{lang}", "fr"), "NAME_fr");
+        assert_eq!(language_column("name_{lang}", "pt-BR"), "name_pt");
+        assert_eq!(language_column("name_{lang}", "zh-Hans"), "name_zh");
+        assert_eq!(language_column("name_{lang}", "zh-Hant"), "name_zht");
+        assert_eq!(language_column("name_{lang}", "zh-TW"), "name_zht");
+        assert_eq!(language_column("name:{lang}", "EN"), "name:en");
+    }
 }
