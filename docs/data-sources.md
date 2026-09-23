@@ -114,9 +114,14 @@ the area weights of `mapgen crosswalk`, which assume values are spread evenly:
   code changes, boundary shifts, merges and splits. Reuse is allowed with attribution.
 
 `scripts/build-crosswalks.py` builds the crosswalks the API hosts into `data/crosswalks/`.
-So far that's `us-counties-2010-2020`: 2010 to 2020 county FIPS codes, weighted by land
-area, from the Census county subdivision comparability file. NUTS tables are published as
-spreadsheets and aren't converted yet.
+So far:
+- `us-counties-2010-2020`: 2010 to 2020 county FIPS codes, weighted by land area, from the
+  Census county subdivision comparability file (Alaska's Valdez-Cordova split, among others).
+- `us-counties-2020-2022`: Connecticut's eight counties to the nine planning regions that
+  replaced them in 2022, weighted by land area town by town, from the Census Gazetteer county
+  subdivision files of 2020 and 2022 (towns kept their codes).
+
+NUTS tables are published as spreadsheets and aren't converted yet.
 
 Values are added up and shared out, so reshape counts (people, votes, businesses), not
 rates, shares or medians: recompute those from reshaped counts.
