@@ -299,10 +299,12 @@ impl Registry {
             .iter()
             .filter(|v| mapgen_data::worldview_path(file, v).is_ok_and(|p| p.exists()))
             .map(|v| {
+                // Natural Earth names Bangladesh's view BDG; its code is BGD.
+                let code = if *v == "BDG" { "BGD" } else { v };
                 let name = self
                     .countries
                     .as_ref()
-                    .and_then(|c| c.features().find(|f| f.id == *v).map(|f| f.name.clone()));
+                    .and_then(|c| c.features().find(|f| f.id == code).map(|f| f.name.clone()));
                 let label = match (*v, name) {
                     ("ISO", _) => "ISO 3166".to_owned(),
                     (_, Some(name)) => format!("{name} ({v})"),
