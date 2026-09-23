@@ -90,7 +90,10 @@ Unknown or misspelled parameters are errors, never silently ignored.
 The `.json` metadata:
 - `width`, `height`, `projection`, `center`;
 - `insets`, `outsideFrame` (regions shown nowhere);
-- `legendSlots`: empty areas for a legend or title, largest first, with `landShare`;
+- `legendSlots`: empty areas for a legend or title, largest first: `position` (`top-left`…
+  `bottom-right`), `x`, `y`, `width`, `height` in the SVG's own coordinates (the map's top-left
+  is `0,0`; a title band sits above it, at negative `y`), and `landShare`, how much of the
+  third of the map at that position is regions or insets. An area of width 0 has no room;
 - `sha1`, `credit`, `licence`, `licenceUrl`, `shareAlike`;
 - `boundaryYear`, `sourceRelease`, `release`;
 - `contract`, and `url` (the canonical URL).
