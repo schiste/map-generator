@@ -11,7 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..", "..", "..");
 const require = createRequire(import.meta.url);
 const mapgen = require(join(here, "..", "pkg", "node", "mapgen_wasm.js"));
-const { MapGenerator, themes, bboxPresets, version } = mapgen;
+const { MapGenerator, themes, bboxPresets, version, reshape } = mapgen;
 
 const fixtures = join(repo, "crates", "mapgen-data", "tests", "fixtures");
 const read = (p) => readFileSync(p, "utf8");
@@ -43,6 +43,24 @@ test("result is a plain JS object with metadata", () => {
   const best = out.legendSlots[0];
   assert.ok(best.width >= 48 && best.height >= 48, JSON.stringify(best));
   assert.ok(best.landShare >= 0 && best.landShare <= 1);
+});
+
+test("matchCodes and reshape: data from another boundary year", () => {
+  const m = twinGenerator().matchCodes({ table: "id,v\n01,1\n09,2\n", codeColumn: "id", codePrefix: "XA-" });
+  assert.equal(m.matched, 1);
+  assert.deepEqual(m.dataNotOnMap, ["XA-09"]);
+  assert.deepEqual(m.mapWithoutData, ["XA-02"]);
+  assert.throws(() => twinGenerator().matchCodes({ codez: [] }), { message: /codez/ });
+
+  // Valdez-Cordova (02261) split in 2019; Wade Hampton (02270) was renamed.
+  const crosswalk = { table: "from,to,weight\n02261,02063,0.278325\n02261,02066,0.721675\n02270,02158,1\n" };
+  const r = reshape({ table: "fips,pop\n02261,1000\n02270,8000\n02020,5\n", codeColumn: "fips", crosswalk });
+  assert.equal(r.csv, "fips,pop\n02020,5\n02063,278.325\n02066,721.675\n02158,8000\n");
+  assert.deepEqual([r.direct, r.weighted, r.conflicts.length], [2, 1, 0]);
+  const blocked = reshape({ table: "fips,pop\n02261,1\n", codeColumn: "fips", crosswalk: { table: "from,to\n02261,02063\n02261,02066\n" } });
+  assert.equal(blocked.csv, undefined);
+  assert.match(blocked.conflicts[0].reason, /split without weights/);
+  assert.throws(() => reshape({ table: "a\n", codeColumn: "a", crosswalk: "us-counties-2010-2020" }), { message: /HTTP API/ });
 });
 
 test("errors are thrown as Error with helpful messages", () => {

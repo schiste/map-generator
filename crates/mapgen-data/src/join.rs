@@ -305,6 +305,137 @@ pub fn crosswalk_rows(
     Ok(rows)
 }
 
+/// A data table moved to new codes by [`reshape_table`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReshapedTable {
+    pub code_column: String,
+    /// The value columns carried over.
+    pub columns: Vec<String>,
+    pub result: Reshaped,
+}
+
+impl ReshapedTable {
+    /// The table on the new codes, as CSV (values rounded to 1e-9).
+    pub fn csv(&self) -> String {
+        let mut out = csv_cell(&self.code_column);
+        for c in &self.columns {
+            out.push(',');
+            out.push_str(&csv_cell(c));
+        }
+        out.push('\n');
+        for (key, values) in &self.result.values {
+            out.push_str(&csv_cell(key));
+            for v in values {
+                out.push_str(&format!(",{}", (v * 1e9).round() / 1e9));
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    /// The values that need a decision, as CSV (`from,targets,reason`).
+    pub fn conflicts_csv(&self) -> String {
+        let mut text = String::from("from,targets,reason\n");
+        for c in &self.result.conflicts {
+            text.push_str(&format!(
+                "{},{},{}\n",
+                csv_cell(&c.from),
+                csv_cell(&c.targets.join(" ")),
+                csv_cell(c.reason)
+            ));
+        }
+        text
+    }
+}
+
+/// Moves the numeric `columns` of `table` (default: every other column
+/// whose non-empty cells are all numbers) from the codes in `code_column`
+/// to new codes through `crosswalk` (see [`reshape`]).
+pub fn reshape_table(
+    table: &Table,
+    code_column: &str,
+    columns: Option<&[String]>,
+    crosswalk: &[CrosswalkRow],
+    complete: bool,
+) -> crate::error::Result<ReshapedTable> {
+    let code = table.column(code_column)?;
+    let columns = match columns {
+        Some(cs) => cs.to_vec(),
+        None => numeric_columns(table, code),
+    };
+    if columns.is_empty() {
+        return Err(crate::error::Error::Table(
+            "no numeric columns to reshape: name them".into(),
+        ));
+    }
+    let idx = columns
+        .iter()
+        .map(|c| table.column(c))
+        .collect::<crate::error::Result<Vec<_>>>()?;
+    let mut data = Vec::new();
+    for r in &table.rows {
+        let Some(key) = table.cell(r, code) else {
+            continue;
+        };
+        let mut values = Vec::with_capacity(idx.len());
+        for (&i, name) in idx.iter().zip(&columns) {
+            let cell = table.cell(r, i).unwrap_or_default();
+            values.push(cell.parse::<f64>().map_err(|_| {
+                crate::error::Error::Table(format!("{key}: {name} is {cell:?}, not a number"))
+            })?);
+        }
+        data.push((key, values));
+    }
+    Ok(ReshapedTable {
+        code_column: code_column.to_owned(),
+        result: reshape(&data, crosswalk, complete),
+        columns,
+    })
+}
+
+/// Columns other than `skip` whose non-empty cells all parse as numbers.
+pub fn numeric_columns(table: &Table, skip: usize) -> Vec<String> {
+    table
+        .header
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != skip)
+        .filter(|(i, _)| {
+            let mut cells = table
+                .rows
+                .iter()
+                .filter_map(|r| table.cell(r, *i))
+                .peekable();
+            cells.peek().is_some() && cells.all(|c| c.parse::<f64>().is_ok())
+        })
+        .map(|(_, h)| h.clone())
+        .collect()
+}
+
+/// Codes of a data table's column, with an optional prefix added.
+pub fn table_codes(
+    table: &Table,
+    code_column: &str,
+    prefix: &str,
+) -> crate::error::Result<BTreeSet<String>> {
+    let col = table.column(code_column)?;
+    Ok(table
+        .rows
+        .iter()
+        .filter_map(|r| table.cell(r, col))
+        .map(|c| format!("{prefix}{c}"))
+        .collect())
+}
+
+/// Quotes a CSV cell when needed.
+pub fn csv_cell(s: &str) -> String {
+    if s.contains([',', '"', '\n']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,6 +517,22 @@ mod tests {
         let r = reshape(&data, &cws, false);
         assert_eq!(r.values["OLD-F"], [7.0]);
         assert_eq!((r.direct, r.conflicts.len()), (4, 1));
+    }
+
+    #[test]
+    fn reshapes_tables_to_csv() {
+        let table =
+            crate::table::parse_table("fips,pop,name\n02261,100,VC\n02020,5,Anc\n").unwrap();
+        let cws = vec![
+            cw("02261", "02063", Some(0.4)),
+            cw("02261", "02066", Some(0.6)),
+        ];
+        let t = reshape_table(&table, "fips", None, &cws, false).unwrap();
+        assert_eq!(t.columns, ["pop"]);
+        assert_eq!(t.csv(), "fips,pop\n02020,5\n02063,40\n02066,60\n");
+        assert_eq!(t.conflicts_csv(), "from,targets,reason\n");
+        let e = reshape_table(&table, "fips", Some(&["name".into()]), &cws, false).unwrap_err();
+        assert!(e.to_string().contains("not a number"), "{e}");
     }
 
     #[test]

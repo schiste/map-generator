@@ -1,6 +1,6 @@
 // Compile-time test of the TypeScript definitions: `npm run typecheck`.
 // Lines marked @ts-expect-error must fail to type-check, or tsc reports an error.
-import { MapGenerator, themes, bboxPresets, version, type MapOutput, type RenderSpec } from "../pkg/node/mapgen_wasm.js";
+import { MapGenerator, themes, bboxPresets, version, reshape, type MapOutput, type RenderSpec, type MatchOutput, type ReshapeOutput } from "../pkg/node/mapgen_wasm.js";
 
 const gen = new MapGenerator();
 const n: number = gen.setSubject("{}");
@@ -72,3 +72,9 @@ gen.render({ projection: "mercator" });
 gen.render({ insets: true });
 
 export { n, svg, proj, regions, water, europe, v, insetIds, splitUnits };
+
+const m: MatchOutput = gen.matchCodes({ codes: ["FR-75"], codePrefix: "" });
+const missing: string[] = m.dataNotOnMap;
+const r: ReshapeOutput = reshape({ table: "a,b\n", codeColumn: "a", crosswalk: { table: "from,to\n" } });
+const csvOut: string | undefined = r.csv;
+void missing; void csvOut;

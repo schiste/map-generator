@@ -29,6 +29,9 @@ document.body.innerHTML = map.svg; // also: map.width, map.height, map.projectio
 - `format: "html"` also returns an interactive page with colour pickers (and
   `textPath` curved labels; SVG output defaults to `target: "commons"`, rotated
   letters that Wikimedia's renderer can draw).
+- Data joins: `gen.matchCodes({ table, codeColumn })` lists codes the map lacks and
+  regions without data; `reshape({ table, codeColumn, crosswalk: { table } })` moves
+  numeric data to new codes (splits need weights; conflicts are returned, not guessed).
 - Multilingual labels: read names with `setSubject(text, { languages: ["fr", "zh-Hant"] })`,
   then `render({ labels: true, languages: ["fr", "zh-Hant"] })`.
 - `themes()`, `bboxPresets()` and `version()` expose the built-in tables.

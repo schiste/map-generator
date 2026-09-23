@@ -15,8 +15,9 @@
 use mapgen_spec as spec;
 
 pub use spec::{
-    bbox_table, parse_units, render_map, theme_table, Dataset, LayerSpec, LoadedLayer, LoadedLines,
-    MapOutput, RenderSpec, Sources, SpecError, UnitColumns,
+    bbox_table, match_layer, parse_units, render_map, reshape_with, theme_table, CrosswalkSource,
+    Dataset, LayerSpec, LoadedLayer, LoadedLines, MapOutput, MatchOutput, MatchSpec, RenderSpec,
+    ReshapeOutput, ReshapeSpec, Sources, SpecError, UnitColumns,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -142,6 +143,58 @@ export interface MapGenerator {
   setUnits(table?: string, columns?: UnitColumns): number;
   /** Renders a map. */
   render(spec?: RenderSpec): MapOutput;
+  /**
+   * Compares a data table's codes (or a list of codes) with the loaded regions:
+   * codes the map lacks usually mean data and boundaries from different years.
+   */
+  matchCodes(spec: MatchSpec): MatchOutput;
+}
+
+/** A data table, or codes, to compare with the map. */
+export interface MatchSpec {
+  /** Region of the layer to compare against (default: the whole layer). */
+  region?: string;
+  /** CSV, TSV or pipe-separated text... */
+  table?: string;
+  /** ...and its code column (default "code"). */
+  codeColumn?: string;
+  /** Or the codes directly. */
+  codes?: string[];
+  /** Prefix added to the data's codes, e.g. "US-" for bare FIPS codes. */
+  codePrefix?: string;
+}
+
+export interface MatchOutput {
+  matched: number;
+  dataNotOnMap: string[];
+  mapWithoutData: string[];
+  /** Share of the data's codes that have no region on the map. */
+  missingShare: number;
+  /** Hosted crosswalks that know the missing codes (HTTP API only). */
+  hints?: { crosswalk: string; direction: "old-data" | "new-data"; codes: string[]; message: string }[];
+}
+
+/** Moves numeric data from old codes to new ones through a crosswalk. */
+export interface ReshapeSpec {
+  table: string;
+  codeColumn: string;
+  /** Default: every other numeric column. Use counts, not rates. */
+  columns?: string[];
+  /** A crosswalk table; the HTTP API also accepts a hosted crosswalk's id. */
+  crosswalk: string | { table: string; fromColumn?: string; toColumn?: string; weightColumn?: string };
+  /** The crosswalk lists every code: codes it lacks are conflicts. */
+  complete?: boolean;
+  /** Return the table even with conflicts, leaving those values out. */
+  allowConflicts?: boolean;
+}
+
+export interface ReshapeOutput {
+  /** The table on the new codes; absent when there are conflicts, unless allowConflicts. */
+  csv?: string;
+  conflicts: { from: string; targets: string[]; reason: string }[];
+  direct: number;
+  weighted: number;
+  columns: string[];
 }
 
 /** Column names of a data-unit table (defaults: map_id, data_unit_id, data_unit_name). */
@@ -371,6 +424,13 @@ impl MapGenerator {
         Ok(to_js(&render_map(src, &spec).map_err(js_err)?)?.unchecked_into())
     }
 
+    /// Compares a data table's codes with the loaded regions.
+    #[wasm_bindgen(js_name = matchCodes, skip_typescript)]
+    pub fn match_codes(&self, spec: js_sys::Object) -> Result<JsValue, JsError> {
+        let spec: MatchSpec = from_js(Some(spec))?;
+        to_js(&match_layer(self.subject()?, &spec).map_err(js_err)?)
+    }
+
     fn subject(&self) -> Result<&LoadedLayer, JsError> {
         self.subject
             .as_ref()
@@ -401,6 +461,31 @@ pub fn themes() -> Result<JsValue, JsError> {
 #[wasm_bindgen(js_name = bboxPresets, unchecked_return_type = "Record<string, [number, number, number, number]>")]
 pub fn bbox_presets() -> Result<JsValue, JsError> {
     to_js(&bbox_table())
+}
+
+/// Moves numeric data from old codes to new ones through a crosswalk table.
+#[wasm_bindgen(unchecked_return_type = "ReshapeOutput")]
+pub fn reshape(
+    #[wasm_bindgen(unchecked_param_type = "ReshapeSpec")] spec: js_sys::Object,
+) -> Result<JsValue, JsError> {
+    let value: JsValue = spec.into();
+    if !value.is_object() || js_sys::Array::is_array(&value) {
+        return Err(JsError::new("options must be a plain object"));
+    }
+    let json: String = js_sys::JSON::stringify(&value)
+        .map_err(|_| JsError::new("options must be JSON-serialisable"))?
+        .into();
+    let spec: ReshapeSpec =
+        serde_json::from_str(&json).map_err(|e| JsError::new(&e.to_string()))?;
+    let crosswalk = match &spec.crosswalk {
+        CrosswalkSource::Inline(c) => c,
+        CrosswalkSource::Hosted(id) => {
+            return Err(JsError::new(&format!(
+                "hosted crosswalks ({id:?}) are only available through the HTTP API; pass the crosswalk table"
+            )))
+        }
+    };
+    to_js(&reshape_with(&spec, crosswalk).map_err(js_err)?)
 }
 
 /// Library version.

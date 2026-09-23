@@ -1,15 +1,15 @@
 //! `mapgen match`, `mapgen crosswalk` and `mapgen reshape`: checking that
 //! data fits a map, and moving data between boundary versions.
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use mapgen_data::join::{
-    crosswalk_rows, match_codes, overlap_crosswalk, reshape, svg_codes, CrosswalkRow,
+    crosswalk_rows, csv_cell, match_codes, overlap_crosswalk, reshape_table, svg_codes,
+    table_codes, CrosswalkRow,
 };
 use mapgen_data::read_layer;
-use mapgen_data::table::{read_table, Table};
+use mapgen_data::table::read_table;
 
 use crate::InputArgs;
 
@@ -45,13 +45,7 @@ pub struct MatchArgs {
 
 pub fn run_match(args: MatchArgs) -> Result<()> {
     let table = read_table(&args.data)?;
-    let col = table.column(&args.code_column)?;
-    let data: BTreeSet<String> = table
-        .rows
-        .iter()
-        .filter_map(|r| table.cell(r, col))
-        .map(|c| format!("{}{c}", args.code_prefix))
-        .collect();
+    let data = table_codes(&table, &args.code_column, &args.code_prefix)?;
     let (codes, units) = if args
         .map
         .extension()
@@ -146,8 +140,8 @@ pub fn run_crosswalk(args: CrosswalkArgs) -> Result<()> {
     for r in &rows {
         out.push_str(&format!(
             "{},{},{}\n",
-            csv(&r.from),
-            csv(&r.to),
+            csv_cell(&r.from),
+            csv_cell(&r.to),
             r.weight.unwrap_or(1.0)
         ));
     }
@@ -210,37 +204,6 @@ pub struct ReshapeArgs {
 
 pub fn run_reshape(args: ReshapeArgs) -> Result<()> {
     let table = read_table(&args.data)?;
-    let code = table.column(&args.code_column)?;
-    let columns = match &args.columns {
-        Some(cs) => cs.clone(),
-        None => numeric_columns(&table, code),
-    };
-    if columns.is_empty() {
-        bail!(
-            "no numeric columns in {}: pass --columns",
-            args.data.display()
-        );
-    }
-    let idx: Vec<usize> = columns
-        .iter()
-        .map(|c| table.column(c))
-        .collect::<Result<_, _>>()?;
-    let mut data = Vec::new();
-    for r in &table.rows {
-        let Some(key) = table.cell(r, code) else {
-            continue;
-        };
-        let values = idx
-            .iter()
-            .zip(&columns)
-            .map(|(&i, name)| {
-                let cell = table.cell(r, i).unwrap_or_default();
-                cell.parse::<f64>()
-                    .with_context(|| format!("{key}: {name} is {cell:?}, not a number"))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        data.push((key, values));
-    }
     let cw_table = read_table(&args.crosswalk)?;
     let cws: Vec<CrosswalkRow> = crosswalk_rows(
         &cw_table,
@@ -248,23 +211,22 @@ pub fn run_reshape(args: ReshapeArgs) -> Result<()> {
         &args.to_column,
         args.weight_column.as_deref(),
     )?;
-    let result = reshape(&data, &cws, args.complete);
+    let reshaped = reshape_table(
+        &table,
+        &args.code_column,
+        args.columns.as_deref(),
+        &cws,
+        args.complete,
+    )
+    .with_context(|| format!("reshaping {}", args.data.display()))?;
+    let result = &reshaped.result;
 
     let conflicts_path = args
         .conflicts
         .clone()
         .unwrap_or_else(|| args.out.with_extension("conflicts.csv"));
     if !result.conflicts.is_empty() {
-        let mut text = String::from("from,targets,reason\n");
-        for c in &result.conflicts {
-            text.push_str(&format!(
-                "{},{},{}\n",
-                csv(&c.from),
-                csv(&c.targets.join(" ")),
-                csv(c.reason)
-            ));
-        }
-        std::fs::write(&conflicts_path, text)?;
+        std::fs::write(&conflicts_path, reshaped.conflicts_csv())?;
         eprintln!(
             "{} value(s) need a decision, listed in {}: add weights to the crosswalk \
              (e.g. from `mapgen crosswalk`) or targets for codes it lacks",
@@ -278,19 +240,7 @@ pub fn run_reshape(args: ReshapeArgs) -> Result<()> {
             );
         }
     }
-    let mut out = csv(&args.code_column);
-    for c in &columns {
-        out.push_str(&format!(",{}", csv(c)));
-    }
-    out.push('\n');
-    for (key, values) in &result.values {
-        out.push_str(&csv(key));
-        for v in values {
-            out.push_str(&format!(",{}", (v * 1e9).round() / 1e9));
-        }
-        out.push('\n');
-    }
-    std::fs::write(&args.out, out)?;
+    std::fs::write(&args.out, reshaped.csv())?;
     eprintln!(
         "wrote {}: {} code(s) carried over or merged, {} shared out by weight, {} new code(s)",
         args.out.display(),
@@ -299,31 +249,4 @@ pub fn run_reshape(args: ReshapeArgs) -> Result<()> {
         result.values.len()
     );
     Ok(())
-}
-
-/// Columns other than `skip` whose non-empty cells all parse as numbers.
-fn numeric_columns(table: &Table, skip: usize) -> Vec<String> {
-    table
-        .header
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| *i != skip)
-        .filter(|(i, _)| {
-            let mut cells = table
-                .rows
-                .iter()
-                .filter_map(|r| table.cell(r, *i))
-                .peekable();
-            cells.peek().is_some() && cells.all(|c| c.parse::<f64>().is_ok())
-        })
-        .map(|(_, h)| h.clone())
-        .collect()
-}
-
-fn csv(s: &str) -> String {
-    if s.contains([',', '"', '\n']) {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_owned()
-    }
 }

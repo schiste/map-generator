@@ -106,6 +106,11 @@ the area weights of `mapgen crosswalk`, which assume values are spread evenly:
   tables between successive NUTS versions (2016 → 2021 → 2024), with the changes typed as
   code changes, boundary shifts, merges and splits. Reuse is allowed with attribution.
 
+`scripts/build-crosswalks.py` builds the crosswalks the API hosts into `data/crosswalks/`.
+So far that's `us-counties-2010-2020`: 2010 to 2020 county FIPS codes, weighted by land
+area, from the Census county subdivision comparability file. NUTS tables are published as
+spreadsheets and aren't converted yet.
+
 Values are added up and shared out, so reshape counts (people, votes, businesses), not
 rates, shares or medians: recompute those from reshaped counts.
 

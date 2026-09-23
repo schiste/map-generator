@@ -204,7 +204,8 @@ impl LoadedLayer {
         set.into_iter().cloned().collect()
     }
 
-    fn select(&self, region: Option<&str>) -> Result<Vec<MapFeature>> {
+    /// The features of `region` (all when `None`).
+    pub fn select(&self, region: Option<&str>) -> Result<Vec<MapFeature>> {
         match region {
             None => Ok(self.all()),
             Some(_) if !self.has_filter => Err(SpecError(
@@ -727,6 +728,208 @@ pub fn render_map(src: Sources, spec: &RenderSpec) -> Result<MapOutput> {
     })
 }
 
+/// How to compare a data table's codes with a map (`matchCodes`,
+/// `POST /api/v1/match`).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MatchSpec {
+    /// Region of the layer to compare against (default: the whole layer).
+    pub region: Option<String>,
+    /// A data table (CSV, TSV or pipe-separated)...
+    pub table: Option<String>,
+    /// ...and its code column (default: `code`).
+    pub code_column: Option<String>,
+    /// Or the codes directly.
+    pub codes: Option<Vec<String>>,
+    /// Prefix added to the data's codes, e.g. `US-` for bare FIPS codes.
+    #[serde(default)]
+    pub code_prefix: String,
+}
+
+/// A code comparison. `hints` name hosted crosswalks that know the codes
+/// missing from the map (API only).
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchOutput {
+    pub matched: usize,
+    pub data_not_on_map: Vec<String>,
+    pub map_without_data: Vec<String>,
+    pub missing_share: f64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hints: Vec<MatchHint>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchHint {
+    pub crosswalk: String,
+    /// `old-data`: the data uses the crosswalk's old codes and the map the
+    /// new ones (reshape with it); `new-data`: the other way round.
+    pub direction: &'static str,
+    pub codes: Vec<String>,
+    pub message: String,
+}
+
+impl MatchSpec {
+    /// The data's codes, prefixed.
+    pub fn data_codes(&self) -> Result<BTreeSet<String>> {
+        match (&self.table, &self.codes) {
+            (Some(text), None) => {
+                let table = mapgen_data::table::parse_table(text).map_err(SpecError)?;
+                let column = self.code_column.as_deref().unwrap_or("code");
+                Ok(mapgen_data::join::table_codes(
+                    &table,
+                    column,
+                    &self.code_prefix,
+                )?)
+            }
+            (None, Some(codes)) => Ok(codes
+                .iter()
+                .map(|c| format!("{}{}", self.code_prefix, c.trim()))
+                .filter(|c| c.len() > self.code_prefix.len())
+                .collect()),
+            _ => Err(SpecError("pass either `table` or `codes`".into())),
+        }
+    }
+}
+
+/// Compares `spec`'s codes with the regions of `layer` (data units count).
+pub fn match_layer(layer: &LoadedLayer, spec: &MatchSpec) -> Result<MatchOutput> {
+    let features = layer.select(spec.region.as_deref())?;
+    let map: BTreeSet<String> = features.iter().map(|f| f.id.clone()).collect();
+    let units: BTreeMap<String, Vec<String>> = features
+        .iter()
+        .filter(|f| !f.units.is_empty())
+        .map(|f| (f.id.clone(), f.units.clone()))
+        .collect();
+    let r = mapgen_data::join::match_codes(&map, &units, &spec.data_codes()?);
+    Ok(MatchOutput {
+        missing_share: r.missing_share(),
+        matched: r.matched,
+        data_not_on_map: r.data_not_on_map,
+        map_without_data: r.map_without_data,
+        hints: Vec::new(),
+    })
+}
+
+/// Where a reshape's crosswalk comes from.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum CrosswalkSource {
+    /// A crosswalk hosted by the API (`GET /api/v1/crosswalks`).
+    Hosted(String),
+    /// A crosswalk table.
+    Inline(InlineCrosswalk),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct InlineCrosswalk {
+    pub table: String,
+    #[serde(default = "from_column")]
+    pub from_column: String,
+    #[serde(default = "to_column")]
+    pub to_column: String,
+    /// Default: `weight` when the table has that column.
+    pub weight_column: Option<String>,
+}
+
+fn from_column() -> String {
+    "from".into()
+}
+
+fn to_column() -> String {
+    "to".into()
+}
+
+/// How to move a table to new codes (`reshape`, `POST /api/v1/reshape`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReshapeSpec {
+    pub table: String,
+    pub code_column: String,
+    /// Default: every other numeric column. Values are added up and shared
+    /// out, so use counts, not rates.
+    pub columns: Option<Vec<String>>,
+    pub crosswalk: CrosswalkSource,
+    /// The crosswalk lists every code; codes it lacks are conflicts.
+    #[serde(default)]
+    pub complete: bool,
+    /// Return the table even with conflicts, leaving those values out.
+    #[serde(default)]
+    pub allow_conflicts: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReshapeOutput {
+    /// The table on the new codes; absent when there are conflicts and
+    /// `allowConflicts` is false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub csv: Option<String>,
+    pub conflicts: Vec<ConflictOutput>,
+    /// Codes carried over or merged.
+    pub direct: usize,
+    /// Codes shared out by weight.
+    pub weighted: usize,
+    pub columns: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ConflictOutput {
+    pub from: String,
+    pub targets: Vec<String>,
+    pub reason: &'static str,
+}
+
+impl InlineCrosswalk {
+    pub fn rows(&self) -> Result<Vec<mapgen_data::join::CrosswalkRow>> {
+        let table = mapgen_data::table::parse_table(&self.table).map_err(SpecError)?;
+        let weight = self.weight_column.clone().or_else(|| {
+            table
+                .header
+                .iter()
+                .any(|h| h == "weight")
+                .then(|| "weight".to_owned())
+        });
+        Ok(mapgen_data::join::crosswalk_rows(
+            &table,
+            &self.from_column,
+            &self.to_column,
+            weight.as_deref(),
+        )?)
+    }
+}
+
+/// Reshapes `spec.table` through `crosswalk` (already resolved).
+pub fn reshape_with(spec: &ReshapeSpec, crosswalk: &InlineCrosswalk) -> Result<ReshapeOutput> {
+    let table = mapgen_data::table::parse_table(&spec.table).map_err(SpecError)?;
+    let t = mapgen_data::join::reshape_table(
+        &table,
+        &spec.code_column,
+        spec.columns.as_deref(),
+        &crosswalk.rows()?,
+        spec.complete,
+    )?;
+    let blocked = !t.result.conflicts.is_empty() && !spec.allow_conflicts;
+    Ok(ReshapeOutput {
+        csv: (!blocked).then(|| t.csv()),
+        conflicts: t
+            .result
+            .conflicts
+            .iter()
+            .map(|c| ConflictOutput {
+                from: c.from.clone(),
+                targets: c.targets.clone(),
+                reason: c.reason,
+            })
+            .collect(),
+        direct: t.result.direct,
+        weighted: t.result.weighted,
+        columns: t.columns,
+    })
+}
+
 /// Built-in themes as `{ name: { slot: colour } }`.
 pub fn theme_table() -> BTreeMap<&'static str, BTreeMap<&'static str, String>> {
     Theme::NAMES
@@ -948,6 +1151,56 @@ mod tests {
             .unwrap()
             .svg
             .contains("<desc"));
+    }
+
+    #[test]
+    fn match_and_reshape_specs() {
+        let layer = twin();
+        let m: MatchSpec = serde_json::from_str(r#"{"codes": ["XA-01", "XA-09"]}"#).unwrap();
+        let out = match_layer(&layer, &m).unwrap();
+        assert_eq!(
+            (out.matched, out.data_not_on_map.clone()),
+            (1, vec!["XA-09".to_string()])
+        );
+        assert_eq!(out.map_without_data, ["XA-02"]);
+        let m: MatchSpec = serde_json::from_str(
+            r#"{"table": "id|v\n01|3\n", "codeColumn": "id", "codePrefix": "XA-"}"#,
+        )
+        .unwrap();
+        assert_eq!(match_layer(&layer, &m).unwrap().matched, 1);
+        assert!(serde_json::from_str::<MatchSpec>(r#"{"code": []}"#).is_err());
+
+        let spec: ReshapeSpec = serde_json::from_str(
+            r#"{"table": "fips,pop\n02261,100\n02020,5\n", "codeColumn": "fips",
+                "crosswalk": {"table": "from,to,weight\n02261,02063,0.4\n02261,02066,0.6\n"}}"#,
+        )
+        .unwrap();
+        let CrosswalkSource::Inline(cw) = &spec.crosswalk else {
+            panic!("inline")
+        };
+        let out = reshape_with(&spec, cw).unwrap();
+        assert_eq!(
+            out.csv.as_deref(),
+            Some("fips,pop\n02020,5\n02063,40\n02066,60\n")
+        );
+        // A split without weights blocks the table unless allowed.
+        let spec: ReshapeSpec = serde_json::from_str(
+            r#"{"table": "fips,pop\n02261,100\n", "codeColumn": "fips",
+                "crosswalk": {"table": "from,to\n02261,02063\n02261,02066\n"}}"#,
+        )
+        .unwrap();
+        let CrosswalkSource::Inline(cw) = &spec.crosswalk else {
+            panic!("inline")
+        };
+        let out = reshape_with(&spec, cw).unwrap();
+        assert!(out.csv.is_none() && out.conflicts.len() == 1);
+        let hosted: ReshapeSpec = serde_json::from_str(
+            r#"{"table": "a\n", "codeColumn": "a", "crosswalk": "us-counties-2010-2020"}"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(hosted.crosswalk, CrosswalkSource::Hosted(ref id) if id == "us-counties-2010-2020")
+        );
     }
 
     #[test]
