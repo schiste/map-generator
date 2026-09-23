@@ -260,7 +260,7 @@
   "/api/v1/maps/{dataset}/{file}": {
    "get": {
     "summary": "A map",
-    "description": "`file` is `{region}.svg` (the map), `{region}.json` (its metadata) or `{region}.html` (interactive page with colour pickers). Unknown or misspelled parameters are errors.",
+    "description": "`file` is `{region}.svg` (the map), `{region}.json` (its metadata) or `{region}.html` (interactive page with colour pickers). `{region}` can list several regions by code or name, comma-separated (`BEL,LUX,NLD.svg`): one map of all of them. Unknown or misspelled parameters are errors.",
     "parameters": [
      {
       "name": "dataset",
@@ -667,13 +667,19 @@
   "/api/v1/render": {
    "post": {
     "summary": "A map from a JSON render spec",
-    "description": "Same as the map GET, with the WASM `RenderSpec` (camelCase) as JSON. `Accept: application/json` returns the metadata plus `svg`.",
+    "description": "Same as the map GET, with the WASM `RenderSpec` (camelCase) as JSON, or a map recipe as CSV (docs/recipes.md). `region` may list several regions. `Accept: application/json` returns the metadata plus `svg`.",
     "requestBody": {
      "required": true,
      "content": {
       "application/json": {
        "schema": {
         "$ref": "#/components/schemas/RenderRequest"
+       }
+      },
+      "text/csv": {
+       "schema": {
+        "type": "string",
+        "description": "A map recipe: key,value rows (docs/recipes.md)."
        }
       }
      }

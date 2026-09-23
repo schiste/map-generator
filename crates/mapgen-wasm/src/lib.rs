@@ -60,6 +60,8 @@ export type ColorSlot =
 export interface RenderSpec {
   /** Keep only features whose region property equals this, e.g. "FRA". */
   region?: string;
+  /** Several regions in one map, e.g. ["FRA", "DEU", "ITA"]; instead of `region`. */
+  regions?: string[];
   width?: number;
   padding?: number;
   precision?: number;
@@ -144,10 +146,41 @@ export interface MapGenerator {
   /** Renders a map. */
   render(spec?: RenderSpec): MapOutput;
   /**
+   * Countries of the loaded layers, for pickers and search: the subject's regions
+   * when they are countries, otherwise the neighbouring countries (setContext).
+   */
+  countries(): Country[];
+  /** Region codes for what people type: codes, names (any loaded language), ISO-2. */
+  resolveRegions(inputs: string[]): { codes: string[]; unknown: string[] };
+  /**
    * Compares a data table's codes (or a list of codes) with the loaded regions:
    * codes the map lacks usually mean data and boundaries from different years.
    */
   matchCodes(spec: MatchSpec): MatchOutput;
+}
+
+export interface Country {
+  /** Region code, e.g. "FRA". */
+  code: string;
+  name: string;
+  /** Lowercase ISO 3166-1 alpha-2, when known. */
+  iso2?: string;
+  /** Names in the languages read (LayerSpec.languages). */
+  names: Record<string, string>;
+}
+
+/**
+ * A map recipe (docs/recipes.md): which regions and every design setting,
+ * as a key,value CSV that spreadsheets can edit.
+ */
+export interface Recipe {
+  /** "ne-admin0" (alias "countries"), "ne-admin1" ("subdivisions"), or an API dataset id. */
+  dataset?: string;
+  /** Codes or names, as written; resolve with MapGenerator.resolveRegions. */
+  regions: string[];
+  worldview?: string;
+  /** The design settings as a RenderSpec. */
+  spec: RenderSpec;
 }
 
 /** A data table, or codes, to compare with the map. */
@@ -424,6 +457,36 @@ impl MapGenerator {
         Ok(to_js(&render_map(src, &spec).map_err(js_err)?)?.unchecked_into())
     }
 
+    /// Countries of the loaded layers (see the TypeScript docs).
+    #[wasm_bindgen(skip_typescript)]
+    pub fn countries(&self) -> Result<JsValue, JsError> {
+        let subject = self.subject()?;
+        let regions: std::collections::BTreeSet<String> = subject.regions().into_iter().collect();
+        let own: Vec<&mapgen_core::MapFeature> = subject
+            .features()
+            .filter(|f| regions.contains(&f.id))
+            .collect();
+        let list: Vec<serde_json::Value> = if !own.is_empty() {
+            own.into_iter().map(country_json).collect()
+        } else {
+            self.context
+                .iter()
+                .flat_map(|c| c.features())
+                .filter(|f| regions.contains(&f.id))
+                .map(country_json)
+                .collect()
+        };
+        to_js(&list)
+    }
+
+    #[wasm_bindgen(js_name = resolveRegions, skip_typescript)]
+    pub fn resolve_regions(&self, inputs: Vec<String>) -> Result<JsValue, JsError> {
+        let (codes, unknown) = self
+            .subject()?
+            .resolve_regions(&inputs, self.context.as_ref());
+        to_js(&serde_json::json!({ "codes": codes, "unknown": unknown }))
+    }
+
     /// Compares a data table's codes with the loaded regions.
     #[wasm_bindgen(js_name = matchCodes, skip_typescript)]
     pub fn match_codes(&self, spec: js_sys::Object) -> Result<JsValue, JsError> {
@@ -486,6 +549,49 @@ pub fn reshape(
         }
     };
     to_js(&reshape_with(&spec, crosswalk).map_err(js_err)?)
+}
+
+/// Reads a map recipe (key,value CSV; see docs/recipes.md).
+#[wasm_bindgen(js_name = parseRecipe, unchecked_return_type = "Recipe")]
+pub fn parse_recipe(text: &str) -> Result<JsValue, JsError> {
+    let recipe = spec::recipe::Recipe::parse(text).map_err(js_err)?;
+    let parsed =
+        spec::params::parse(&recipe.params, &[]).map_err(|e| JsError::new(&e.to_string()))?;
+    to_js(&serde_json::json!({
+        "dataset": recipe.dataset,
+        "regions": recipe.regions,
+        "worldview": recipe.worldview,
+        "spec": parsed.spec,
+    }))
+}
+
+/// Writes a map recipe: the regions and the design settings of a RenderSpec.
+#[wasm_bindgen(js_name = recipeToCsv)]
+pub fn recipe_to_csv(
+    #[wasm_bindgen(unchecked_param_type = "Recipe")] recipe: js_sys::Object,
+) -> Result<String, JsError> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct In {
+        dataset: Option<String>,
+        #[serde(default)]
+        regions: Vec<String>,
+        worldview: Option<String>,
+        #[serde(default)]
+        spec: serde_json::Map<String, serde_json::Value>,
+    }
+    let json: String = js_sys::JSON::stringify(&recipe.into())
+        .map_err(|_| JsError::new("the recipe must be JSON-serialisable"))?
+        .into();
+    let r: In = serde_json::from_str(&json).map_err(|e| JsError::new(&e.to_string()))?;
+    // Check the settings before writing them.
+    serde_json::from_value::<RenderSpec>(serde_json::Value::Object(r.spec.clone()))
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(spec::recipe::Recipe::from_spec(r.dataset, r.regions, r.worldview, &r.spec).to_csv())
+}
+
+fn country_json(f: &mapgen_core::MapFeature) -> serde_json::Value {
+    serde_json::json!({ "code": f.id, "name": f.name, "iso2": f.country, "names": f.names })
 }
 
 /// Library version.

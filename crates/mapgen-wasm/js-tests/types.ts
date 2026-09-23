@@ -1,6 +1,6 @@
 // Compile-time test of the TypeScript definitions: `npm run typecheck`.
 // Lines marked @ts-expect-error must fail to type-check, or tsc reports an error.
-import { MapGenerator, themes, bboxPresets, version, reshape, type MapOutput, type RenderSpec, type MatchOutput, type ReshapeOutput } from "../pkg/node/mapgen_wasm.js";
+import { MapGenerator, themes, bboxPresets, version, reshape, parseRecipe, recipeToCsv, type Recipe, type Country, type MapOutput, type RenderSpec, type MatchOutput, type ReshapeOutput } from "../pkg/node/mapgen_wasm.js";
 
 const gen = new MapGenerator();
 const n: number = gen.setSubject("{}");
@@ -78,3 +78,10 @@ const missing: string[] = m.dataNotOnMap;
 const r: ReshapeOutput = reshape({ table: "a,b\n", codeColumn: "a", crosswalk: { table: "from,to\n" } });
 const csvOut: string | undefined = r.csv;
 void missing; void csvOut;
+
+const recipe: Recipe = parseRecipe("key,value\ndataset,countries\nregion,FRA\n");
+const recipeText: string = recipeToCsv({ dataset: recipe.dataset, regions: ["FRA"], spec: recipe.spec });
+const picked: Country[] = gen.countries();
+const resolved: string[] = gen.resolveRegions(["France"]).codes;
+gen.render({ regions: resolved });
+void recipeText; void picked;

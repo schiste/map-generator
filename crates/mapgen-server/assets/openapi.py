@@ -70,7 +70,7 @@ paths = {
     "/api/v1/datasets/{dataset}/regions/{region}/features": {"get": {"summary": "The regions of a map, without geometry: codes, names, parents", "parameters": [P_DATASET, P_REGION, P_LANGS],
         "responses": {"200": js({"type": "array", "items": ref("Feature")}), "404": problem("Unknown dataset or region")}}},
     "/api/v1/maps/{dataset}/{file}": {"get": {
-        "summary": "A map", "description": "`file` is `{region}.svg` (the map), `{region}.json` (its metadata) or `{region}.html` (interactive page with colour pickers). Unknown or misspelled parameters are errors.",
+        "summary": "A map", "description": "`file` is `{region}.svg` (the map), `{region}.json` (its metadata) or `{region}.html` (interactive page with colour pickers). `{region}` can list several regions by code or name, comma-separated (`BEL,LUX,NLD.svg`): one map of all of them. Unknown or misspelled parameters are errors.",
         "parameters": [P_DATASET, {"name": "file", "in": "path", "required": True, "schema": {"type": "string"}, "example": "FRA.svg"}] + map_query
             + [{"name": "If-None-Match", "in": "header", "schema": {"type": "string"}}],
         "responses": {
@@ -79,8 +79,9 @@ paths = {
             "400": problem("Invalid parameter"), "404": problem("Unknown dataset, region, format, release or point of view"),
             "503": problem("Busy or too slow: retry after Retry-After seconds")}}},
     "/api/v1/render": {"post": {"summary": "A map from a JSON render spec",
-        "description": "Same as the map GET, with the WASM `RenderSpec` (camelCase) as JSON. `Accept: application/json` returns the metadata plus `svg`.",
-        "requestBody": {"required": True, "content": {"application/json": {"schema": ref("RenderRequest")}}},
+        "description": "Same as the map GET, with the WASM `RenderSpec` (camelCase) as JSON, or a map recipe as CSV (docs/recipes.md). `region` may list several regions. `Accept: application/json` returns the metadata plus `svg`.",
+        "requestBody": {"required": True, "content": {"application/json": {"schema": ref("RenderRequest")},
+                                                       "text/csv": {"schema": {"type": "string", "description": "A map recipe: key,value rows (docs/recipes.md)."}}}},
         "responses": {"200": {"description": "SVG, HTML (spec.format = html) or JSON", "content": {"image/svg+xml": {}, "application/json": {"schema": ref("MapMetadata")}}},
                       "400": problem("Invalid spec"), "404": problem("Unknown dataset or region"), "503": problem("Busy")}}},
     "/api/v1/match": {"post": {"summary": "Compare a data table's codes with a map's regions",

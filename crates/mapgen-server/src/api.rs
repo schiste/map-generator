@@ -12,9 +12,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use mapgen_core::{GeoBBox, CONTRACT_VERSION};
 use mapgen_spec::{
-    bbox_table, match_layer, render_map, reshape_with, theme_table, CrosswalkSource, Format, Frame,
-    InlineCrosswalk, LoadedLayer, MapOutput, MatchHint, MatchSpec, RenderSpec, ReshapeSpec,
-    Sources,
+    bbox_table, match_layer, recipe::Recipe, render_map, reshape_with, theme_table,
+    CrosswalkSource, Format, Frame, InlineCrosswalk, LoadedLayer, MapOutput, MatchHint, MatchSpec,
+    RenderSpec, ReshapeSpec, Sources,
 };
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -25,7 +25,7 @@ use tower_http::services::ServeDir;
 use crate::cache::Cache;
 use crate::error::ApiError;
 use crate::query::{self, MapParams};
-use crate::registry::{DatasetEntry, Region};
+use crate::registry::{DatasetEntry, Provenance, Region};
 use crate::AppState;
 
 type St = State<Arc<AppState>>;
@@ -334,6 +334,90 @@ fn region<'a>(d: &'a DatasetEntry, code: &str) -> ApiResult<&'a Region> {
     })
 }
 
+/// One or more regions of a dataset, as one map.
+struct Selection<'a> {
+    regions: Vec<&'a Region>,
+    /// Their codes joined by `,` (as in the canonical path).
+    code: String,
+    provenance: Provenance,
+}
+
+/// Resolves `FRA`, `FRA,DEU,ITA` or names (`France,Germany`) to regions.
+fn select<'a>(d: &'a DatasetEntry, spec: &str) -> ApiResult<Selection<'a>> {
+    let one = |input: &str| -> ApiResult<&'a Region> {
+        let input = input.trim();
+        d.regions
+            .get(input)
+            .or_else(|| {
+                d.regions.values().find(|r| {
+                    r.code.eq_ignore_ascii_case(input) || r.name.eq_ignore_ascii_case(input)
+                })
+            })
+            .ok_or_else(|| {
+                ApiError::not_found(format!(
+                    "no region {input:?} in {}: see /api/v1/datasets/{}/regions",
+                    d.config.id, d.config.id
+                ))
+            })
+    };
+    let mut regions = match d.regions.get(spec) {
+        Some(r) => vec![r],
+        None => spec
+            .split(',')
+            .filter(|p| !p.trim().is_empty())
+            .map(one)
+            .collect::<ApiResult<Vec<_>>>()?,
+    };
+    regions.sort_by(|a, b| a.code.cmp(&b.code));
+    regions.dedup_by(|a, b| a.code == b.code);
+    if regions.is_empty() {
+        return Err(ApiError::not_found("no region given"));
+    }
+    if regions.len() > 1 && regions.iter().any(|r| r.code == "world") {
+        return Err(ApiError::bad_request(
+            "`world` can't be combined with other regions",
+        ));
+    }
+    let distinct = |f: &dyn Fn(&Region) -> String| {
+        let mut v: Vec<String> = regions
+            .iter()
+            .map(|r| f(r))
+            .filter(|x| !x.is_empty())
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    let single = |v: Vec<String>| {
+        if v.len() == 1 {
+            v.into_iter().next()
+        } else {
+            None
+        }
+    };
+    let provenance = Provenance {
+        credit: distinct(&|r| r.provenance.credit.clone()).join("; "),
+        licence: distinct(&|r| r.provenance.licence.clone()).join("; "),
+        licence_url: single(distinct(&|r| {
+            r.provenance.licence_url.clone().unwrap_or_default()
+        })),
+        share_alike: regions.iter().any(|r| r.provenance.share_alike),
+        release: distinct(&|r| r.provenance.release.clone()).join(" + "),
+        boundary_year: single(distinct(&|r| {
+            r.provenance.boundary_year.clone().unwrap_or_default()
+        })),
+    };
+    Ok(Selection {
+        code: regions
+            .iter()
+            .map(|r| r.code.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+        regions,
+        provenance,
+    })
+}
+
 #[derive(Deserialize)]
 struct LangQuery {
     languages: Option<String>,
@@ -438,17 +522,17 @@ struct Rendered {
 }
 
 /// Renders `region` of `d` with `spec`.
-fn render_region(
+fn render_selection(
     s: &AppState,
     d: &DatasetEntry,
-    r: &Region,
+    sel: &Selection,
     mut spec: RenderSpec,
     worldview: Option<&str>,
 ) -> ApiResult<Rendered> {
-    if spec.region.is_some() {
+    if spec.region.is_some() || spec.regions.is_some() {
         return Err(ApiError::bad_param(
             "region",
-            "the region is set by the path or the `region` member",
+            "the regions are set by the path, the `region` member or the recipe",
         ));
     }
     if spec.width.is_some_and(|w| w > s.settings.max_width) {
@@ -457,37 +541,50 @@ fn render_region(
             &format!("at most {} px", s.settings.max_width),
         ));
     }
-    let features = s
-        .registry
-        .features(d, r, &spec.languages, worldview)
-        .map_err(|e| {
-            if e.contains("not hosted") {
-                ApiError::not_found(e)
-            } else {
-                ApiError::internal(e)
-            }
-        })?;
-    let layer_spec = s.registry.layer_spec(d, r, &spec.languages, worldview);
-    let filter = r.column.as_ref().map(|_| r.code.clone());
-    let subject = LoadedLayer::from_rows(
-        features.into_iter().map(|f| (filter.clone(), f)).collect(),
-        filter.is_some(),
-        layer_spec.attribution.clone().filter(|c| !c.is_empty()),
-    );
-    spec.region = filter;
+    // Each region's features, tagged with its code (regions may come from
+    // different files or columns).
+    let mut rows = Vec::new();
+    for r in &sel.regions {
+        let features = s
+            .registry
+            .features(d, r, &spec.languages, worldview)
+            .map_err(|e| {
+                if e.contains("not hosted") {
+                    ApiError::not_found(e)
+                } else {
+                    ApiError::internal(e)
+                }
+            })?;
+        rows.extend(features.into_iter().map(|f| (Some(r.code.clone()), f)));
+    }
+    let credit = match worldview {
+        Some(v) if d.config.worldviews => {
+            format!("Natural Earth ({} view)", v.to_ascii_uppercase())
+        }
+        _ => sel.provenance.credit.clone(),
+    };
+    let subject = LoadedLayer::from_rows(rows, true, Some(credit).filter(|c| !c.is_empty()));
+    let codes: Vec<String> = sel.regions.iter().map(|r| r.code.clone()).collect();
+    if let [code] = codes.as_slice() {
+        spec.region = Some(code.clone());
+    } else {
+        spec.regions = Some(codes);
+    }
     // A continent gets its frame preset, as `mapgen render --continent`.
-    if r.column.as_deref() == Some("CONTINENT")
-        && spec.bbox.is_none()
-        && spec.frame == Frame::Auto
-        && GeoBBox::parse(&r.code).is_ok()
-    {
-        spec.bbox = Some(r.code.clone());
+    if let [r] = sel.regions.as_slice() {
+        if r.column.as_deref() == Some("CONTINENT")
+            && spec.bbox.is_none()
+            && spec.frame == Frame::Auto
+            && GeoBBox::parse(&r.code).is_ok()
+        {
+            spec.bbox = Some(r.code.clone());
+        }
     }
     if spec.boundary_year.is_none() {
-        spec.boundary_year = r.provenance.boundary_year.clone();
+        spec.boundary_year = sel.provenance.boundary_year.clone();
     }
-    if spec.source_release.is_none() && !r.provenance.release.is_empty() {
-        spec.source_release = Some(r.provenance.release.clone());
+    if spec.source_release.is_none() && !sel.provenance.release.is_empty() {
+        spec.source_release = Some(sel.provenance.release.clone());
     }
     let countries = s
         .registry
@@ -511,14 +608,14 @@ fn render_region(
     })
 }
 
-fn metadata(d: &DatasetEntry, r: &Region, m: &Rendered, sha1: &str, canonical: &str) -> Value {
+fn metadata(d: &DatasetEntry, sel: &Selection, m: &Rendered, sha1: &str, canonical: &str) -> Value {
     let mut out = serde_json::to_value(&m.output).unwrap_or_default();
     let obj = out.as_object_mut().expect("MapOutput is an object");
     obj.remove("svg");
     obj.remove("html");
-    let p = &r.provenance;
+    let p = &sel.provenance;
     obj.insert("dataset".into(), json!(d.config.id));
-    obj.insert("region".into(), json!(r.code));
+    obj.insert("region".into(), json!(sel.code));
     obj.insert("sha1".into(), json!(sha1));
     obj.insert("credit".into(), json!(m.credit));
     obj.insert("licence".into(), json!(p.licence));
@@ -540,7 +637,7 @@ fn sha1(bytes: &[u8]) -> String {
 fn map_response(
     body: Vec<u8>,
     content_type: &'static str,
-    r: &Region,
+    p: &Provenance,
     pinned: bool,
     canonical: &str,
     headers: &HeaderMap,
@@ -585,14 +682,14 @@ fn map_response(
     set(
         h,
         header::HeaderName::from_static("x-dataset-release"),
-        &r.provenance.release,
+        &p.release,
     );
     set(
         h,
         header::HeaderName::from_static("x-cache"),
         if cache_hit { "hit" } else { "miss" },
     );
-    if let Some(url) = &r.provenance.licence_url {
+    if let Some(url) = &p.licence_url {
         set(h, header::LINK, &format!("<{url}>; rel=\"license\""));
     }
     res
@@ -620,23 +717,24 @@ async fn map_get(
     let params = query::parse(&pairs)?;
     check_worldview(params.worldview.as_deref())?;
     let d = dataset(&s, &id)?;
-    let r = region(d, code)?;
+    let sel = select(d, code)?;
     let pinned = match &params.release {
-        Some(rel) if *rel != r.provenance.release => {
+        Some(rel) if *rel != sel.provenance.release => {
             return Err(ApiError::not_found(format!(
                 "release {rel:?} of {id} is not hosted (current: {:?}); drop `release` for the current one",
-                r.provenance.release
+                sel.provenance.release
             )))
         }
         Some(_) => true,
         None => false,
     };
+    // Canonical: region codes sorted, whatever order or spelling was asked.
     let canonical = {
         let q = query::canonical(&params);
         let base = format!(
             "/api/v1/maps/{}/{}.{format}",
             query::encode(&id),
-            query::encode(code)
+            query::encode(&sel.code)
         );
         if q.is_empty() {
             base
@@ -650,14 +748,14 @@ async fn map_get(
         VERSION,
         COMMIT.unwrap_or("dev"),
         &id,
-        &r.provenance.release,
+        &sel.provenance.release,
         &canonical,
     ]);
     if let Some(body) = s.cache.get(&key) {
         return Ok(map_response(
             body,
             content_type,
-            r,
+            &sel.provenance,
             pinned,
             &canonical,
             &headers,
@@ -669,16 +767,16 @@ async fn map_get(
         spec.format = Format::Html;
     }
     let state = s.clone();
-    let (id2, code2, canonical2) = (id.clone(), code.to_owned(), canonical.clone());
+    let (id2, code2, canonical2) = (id.clone(), sel.code.clone(), canonical.clone());
     let body = blocking(&s, move || {
         let d = dataset(&state, &id2)?;
-        let r = region(d, &code2)?;
-        let m = render_region(&state, d, r, spec, params.worldview.as_deref())?;
+        let sel = select(d, &code2)?;
+        let m = render_selection(&state, d, &sel, spec, params.worldview.as_deref())?;
         let svg_sha1 = sha1(m.output.svg.as_bytes());
         Ok(match format {
             "svg" => m.output.svg.clone().into_bytes(),
             "html" => m.output.html.clone().unwrap_or_default().into_bytes(),
-            _ => serde_json::to_vec_pretty(&metadata(d, r, &m, &svg_sha1, &canonical2))
+            _ => serde_json::to_vec_pretty(&metadata(d, &sel, &m, &svg_sha1, &canonical2))
                 .unwrap_or_default(),
         })
     })
@@ -687,7 +785,7 @@ async fn map_get(
     Ok(map_response(
         body,
         content_type,
-        r,
+        &sel.provenance,
         pinned,
         &canonical,
         &headers,
@@ -731,30 +829,56 @@ struct RenderRequest {
 }
 
 async fn render_post(State(s): St, headers: HeaderMap, body: Bytes) -> ApiResult<Response> {
-    let req: RenderRequest =
-        serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(e.to_string()))?;
-    check_worldview(req.worldview.as_deref())?;
-    let spec: RenderSpec = serde_json::from_value(Value::Object(req.spec.clone()))
-        .map_err(|e| ApiError::spec(&format!("spec: {e}"), false))?;
+    let is_csv = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|t| t.starts_with("text/csv") || t.starts_with("text/plain"));
+    // A JSON request, or a map recipe (docs/recipes.md).
+    let (dataset_id, regions, view, spec) = if is_csv {
+        let text = std::str::from_utf8(&body)
+            .map_err(|_| ApiError::bad_request("the recipe is not UTF-8"))?;
+        let recipe =
+            Recipe::parse(text).map_err(|e| ApiError::bad_request(format!("recipe: {}", e.0)))?;
+        let spec = recipe
+            .spec()
+            .map_err(|e| ApiError::bad_request(format!("recipe: {}", e.0)))?;
+        let dataset = recipe.dataset.clone().ok_or_else(|| {
+            ApiError::bad_param(
+                "dataset",
+                "the recipe needs a `dataset` row (e.g. countries)",
+            )
+        })?;
+        if recipe.regions.is_empty() {
+            return Err(ApiError::bad_param("region", "the recipe lists no region"));
+        }
+        (
+            dataset,
+            recipe.regions.join(","),
+            recipe.worldview.clone(),
+            spec,
+        )
+    } else {
+        let req: RenderRequest =
+            serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(e.to_string()))?;
+        let spec: RenderSpec = serde_json::from_value(Value::Object(req.spec.clone()))
+            .map_err(|e| ApiError::spec(&format!("spec: {e}"), false))?;
+        (req.dataset, req.region, req.worldview, spec)
+    };
+    check_worldview(view.as_deref())?;
     let wants_json = headers
         .get(header::ACCEPT)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|a| a.contains("application/json"));
     let html = spec.format == Format::Html;
     let state = s.clone();
-    let (dataset_id, code, view) = (
-        req.dataset.clone(),
-        req.region.clone(),
-        req.worldview.clone(),
-    );
     let (body, content_type, release) = blocking(&s, move || {
         let d = dataset(&state, &dataset_id)?;
-        let r = region(d, &code)?;
-        let m = render_region(&state, d, r, spec, view.as_deref())?;
+        let sel = select(d, &regions)?;
+        let m = render_selection(&state, d, &sel, spec, view.as_deref())?;
         let svg_sha1 = sha1(m.output.svg.as_bytes());
-        let release = r.provenance.release.clone();
+        let release = sel.provenance.release.clone();
         if wants_json {
-            let mut meta = metadata(d, r, &m, &svg_sha1, "");
+            let mut meta = metadata(d, &sel, &m, &svg_sha1, "");
             meta["svg"] = json!(m.output.svg);
             if let Some(h) = &m.output.html {
                 meta["html"] = json!(h);

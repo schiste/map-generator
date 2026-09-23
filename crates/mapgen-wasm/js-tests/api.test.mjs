@@ -11,7 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..", "..", "..");
 const require = createRequire(import.meta.url);
 const mapgen = require(join(here, "..", "pkg", "node", "mapgen_wasm.js"));
-const { MapGenerator, themes, bboxPresets, version, reshape } = mapgen;
+const { MapGenerator, themes, bboxPresets, version, reshape, parseRecipe, recipeToCsv } = mapgen;
 
 const fixtures = join(repo, "crates", "mapgen-data", "tests", "fixtures");
 const read = (p) => readFileSync(p, "utf8");
@@ -61,6 +61,20 @@ test("matchCodes and reshape: data from another boundary year", () => {
   assert.equal(blocked.csv, undefined);
   assert.match(blocked.conflicts[0].reason, /split without weights/);
   assert.throws(() => reshape({ table: "a\n", codeColumn: "a", crosswalk: "us-counties-2010-2020" }), { message: /HTTP API/ });
+});
+
+test("recipes: parse, validate, and write back", () => {
+  const r = parseRecipe("# custom\nkey,value\ndataset,countries\nregion,France\nregions,DEU;Italy\ntitle,\"A, B\"\nwidth,1200\nlabels,true\ncolor-water,#c6ecff\nlanguages,fr;de\n");
+  assert.equal(r.dataset, "ne-admin0");
+  assert.deepEqual(r.regions, ["France", "DEU", "Italy"]);
+  assert.deepEqual(r.spec, { title: "A, B", width: 1200, labels: true, colors: { water: "#c6ecff" }, languages: ["fr", "de"] });
+  const csv = recipeToCsv({ dataset: "ne-admin0", regions: ["FRA", "DEU"], spec: { ...r.spec, cssVars: true } });
+  assert.match(csv, /^# map-generator recipe v1/);
+  assert.match(csv, /key,value\ndataset,ne-admin0\nregion,FRA\nregion,DEU\ncolor-water,#c6ecff\ncss-vars,true\nlabels,true\nlanguages,fr;de\ntitle,"A, B"\nwidth,1200\n/);
+  assert.deepEqual(parseRecipe(csv).spec, { ...r.spec, cssVars: true });
+  assert.throws(() => parseRecipe("key,value\ncolour-water,red\n"), { message: /colour-water/ });
+  assert.throws(() => recipeToCsv({ spec: { colours: {} } }), { message: /colours/ });
+  assert.deepEqual(parseRecipe("country,category\nFrance,A\n").regions, ["France"]);
 });
 
 test("errors are thrown as Error with helpful messages", () => {
@@ -212,6 +226,24 @@ test("parity: Fiji with CSS custom properties", { skip: skipUnless(hasNE) }, () 
     title: "Fiji (straddles 180°)",
   });
   assert.equal(out.svg, read(join(examples, "fiji.svg")));
+});
+
+test("custom maps: several countries, picked by name", { skip: skipUnless(hasNE) }, () => {
+  const gen = withContext(ne.admin0, { dataset: "ne-admin0" });
+  const countries = gen.countries();
+  assert.ok(countries.length > 200);
+  assert.deepEqual(countries.find((c) => c.code === "FRA"), { code: "FRA", name: "France", iso2: "fr", names: {} });
+  const { codes, unknown } = gen.resolveRegions(["France", "de", "ITA", "Atlantis", "france"]);
+  assert.deepEqual([codes, unknown], [["FRA", "DEU", "ITA"], ["Atlantis"]]);
+  const out = gen.render({ regions: codes, width: 600, labels: true });
+  for (const c of codes) assert.match(out.svg, new RegExp(`<path id="${c}" class="mg-land`));
+  assert.doesNotMatch(out.svg, /<path id="ESP" class="mg-land/);
+  assert.match(out.svg, /<path id="ESP" class="mg-context/);
+  // Subdivisions of two countries, named through the neighbouring countries.
+  const sub = withContext(ne.admin1, { dataset: "ne-admin1" });
+  assert.deepEqual(sub.resolveRegions(["Belgium", "NLD"]).codes, ["BEL", "NLD"]);
+  assert.ok(sub.countries().some((c) => c.code === "BEL" && c.name === "Belgium"));
+  assert.throws(() => sub.render({ regions: ["BEL", "XXX"] }), { message: /XXX/ });
 });
 
 const indFile = join(data, "ne_10m_admin_0_ind.geojson");

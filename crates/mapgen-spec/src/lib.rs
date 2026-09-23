@@ -14,6 +14,9 @@ use mapgen_core::{
 use mapgen_data::{LayerQuery, Source};
 use serde::{Deserialize, Serialize};
 
+pub mod params;
+pub mod recipe;
+
 /// Error surfaced to JavaScript as an `Error` with this message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpecError(pub String);
@@ -227,6 +230,74 @@ impl LoadedLayer {
         }
     }
 
+    /// The features of several regions; every one must exist.
+    pub fn select_many(&self, regions: &[String]) -> Result<Vec<MapFeature>> {
+        if !self.has_filter {
+            return Err(SpecError(
+                "`regions` needs a region column: load the layer with a dataset preset or `filterProperty`"
+                    .into(),
+            ));
+        }
+        let wanted: BTreeSet<&str> = regions.iter().map(String::as_str).collect();
+        let known: BTreeSet<&str> = self.rows.iter().filter_map(|(v, _)| v.as_deref()).collect();
+        let missing: Vec<&str> = wanted
+            .iter()
+            .filter(|r| !known.contains(**r))
+            .copied()
+            .collect();
+        if !missing.is_empty() {
+            return Err(SpecError(format!(
+                "no features matched region(s) {}",
+                missing.join(", ")
+            )));
+        }
+        Ok(self
+            .rows
+            .iter()
+            .filter(|(v, _)| v.as_deref().is_some_and(|v| wanted.contains(v)))
+            .map(|(_, f)| f.clone())
+            .collect())
+    }
+
+    /// Region codes for what people type: codes (any case), names (any
+    /// language loaded), ISO 3166-1 alpha-2 codes. Names are looked up in the
+    /// layer itself when its regions are its features (countries), then in
+    /// `countries` (e.g. Natural Earth Admin-0, for layers of subdivisions).
+    /// Returns the codes found and the inputs that matched nothing.
+    pub fn resolve_regions(
+        &self,
+        inputs: &[String],
+        countries: Option<&LoadedLayer>,
+    ) -> (Vec<String>, Vec<String>) {
+        let known: BTreeSet<&str> = self.rows.iter().filter_map(|(v, _)| v.as_deref()).collect();
+        let norm = |s: &str| s.trim().to_lowercase();
+        let mut lookup: BTreeMap<String, String> = BTreeMap::new();
+        // A feature names a region when its id is that region's code:
+        // countries in a layer of countries, or in `countries`.
+        for layer in [Some(self), countries].into_iter().flatten() {
+            for f in layer.features().filter(|f| known.contains(f.id.as_str())) {
+                for key in std::iter::once(&f.name).chain(f.names.values()) {
+                    lookup.entry(norm(key)).or_insert_with(|| f.id.clone());
+                }
+                if let Some(iso2) = &f.country {
+                    lookup.entry(norm(iso2)).or_insert_with(|| f.id.clone());
+                }
+            }
+        }
+        for code in &known {
+            lookup.insert(norm(code), (*code).to_owned());
+        }
+        let (mut found, mut unknown) = (Vec::new(), Vec::new());
+        for input in inputs {
+            match lookup.get(&norm(input)) {
+                Some(code) if !found.contains(code) => found.push(code.clone()),
+                Some(_) => {}
+                None => unknown.push(input.clone()),
+            }
+        }
+        (found, unknown)
+    }
+
     fn all(&self) -> Vec<MapFeature> {
         self.rows.iter().map(|(_, f)| f.clone()).collect()
     }
@@ -331,6 +402,8 @@ pub enum Format {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RenderSpec {
     pub region: Option<String>,
+    /// Several regions in one map (e.g. `["FRA", "DEU", "ITA"]`); instead of `region`.
+    pub regions: Option<Vec<String>>,
     pub width: Option<u32>,
     pub padding: Option<u32>,
     pub precision: Option<usize>,
@@ -670,7 +743,11 @@ pub fn render_map(src: Sources, spec: &RenderSpec) -> Result<MapOutput> {
         opts.attribution = src.credits();
     }
     let region = spec.region.as_deref();
-    let mut subject = src.subject.select(region)?;
+    let mut subject = match (region, &spec.regions) {
+        (Some(_), Some(_)) => return Err(SpecError("pass `region` or `regions`, not both".into())),
+        (_, Some(list)) => src.subject.select_many(list)?,
+        (_, None) => src.subject.select(region)?,
+    };
     let unit_report = src.units.map(|rows| {
         let r = check_units(&subject, rows);
         UnitReportOutput {
@@ -698,6 +775,9 @@ pub fn render_map(src: Sources, spec: &RenderSpec) -> Result<MapOutput> {
         disputed: src.disputed.map(|d| d.lines.clone()).unwrap_or_default(),
     };
     layers.exclude_subject_from_context(region);
+    for r in spec.regions.iter().flatten() {
+        layers.exclude_subject_from_context(Some(r));
+    }
     let rendered = render(&layers, &opts)?;
     let projection = rendered.projection.name();
     let center = rendered.projection.center();

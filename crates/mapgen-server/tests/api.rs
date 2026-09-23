@@ -33,6 +33,17 @@ fn data_dir(name: &str) -> PathBuf {
         r#"{"license": "CC BY-SA 4.0", "source": "Test survey", "via": "tests", "year": "2020", "release": "r1"}"#,
     )
     .unwrap();
+    // A second country for multi-region maps, with another licence.
+    std::fs::write(
+        dir.join("twin-files/XB.geojson"),
+        r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"id":"XB-01","name":"Bland"},"geometry":{"type":"Polygon","coordinates":[[[11,45],[12,45],[12,46],[11,46],[11,45]]]}}]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("twin-files/XB.license.json"),
+        r#"{"license": "CC0", "source": "Other survey", "year": "2020", "release": "r2"}"#,
+    )
+    .unwrap();
     std::fs::write(
         dir.join("crosswalks/twin-old-new.csv"),
         "from,to,weight\nXA-00,XA-01,1\nXA-02,XA-09,1\n",
@@ -165,6 +176,7 @@ async fn discovery_endpoints() {
     assert_eq!(ds.as_array().unwrap().len(), 2);
     assert_eq!(ds[0]["licence"], "CC0");
     assert_eq!(ds[1]["licencePerRegion"], true);
+    assert_eq!(ds[1]["regions"], 2);
     let regions = get(&app, "/api/v1/datasets/twin-files/regions")
         .await
         .json();
@@ -497,5 +509,70 @@ async fn cache_headers() {
     assert_eq!(cc(&get(&app, "/api/v1/health").await), "no-cache");
     assert_eq!(cc(&get(&app, "/api/v1/version").await), "no-cache");
     assert_eq!(cc(&get(&app, "/api/v1/maps/twin/XX.svg").await), "");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn custom_maps_of_several_regions_and_recipes() {
+    let (app, dir) = server("multi");
+    // Codes in any order and case, or names: one canonical map.
+    let a = get(&app, "/api/v1/maps/twin-files/XB,XA.svg?width=400").await;
+    assert_eq!(a.status, StatusCode::OK, "{}", a.text());
+    assert_eq!(
+        a.header("content-location"),
+        "/api/v1/maps/twin-files/XA,XB.svg?width=400"
+    );
+    let svg = a.text();
+    assert!(svg.contains("id=\"XA-01\"") && svg.contains("id=\"XB-01\""));
+    assert!(
+        svg.contains("Other survey (CC0); Test survey (CC BY-SA 4.0) via tests"),
+        "{svg}"
+    );
+    let b = get(&app, "/api/v1/maps/twin-files/xa,XB.svg?width=400").await;
+    assert_eq!((b.header("x-cache"), b.body == a.body), ("hit", true));
+    let m = get(&app, "/api/v1/maps/twin-files/XA,XB.json").await.json();
+    assert_eq!(
+        (m["region"].as_str(), m["shareAlike"].as_bool()),
+        (Some("XA,XB"), Some(true))
+    );
+    assert_eq!(m["release"], "r1 + r2");
+    assert_eq!(
+        get(&app, "/api/v1/maps/twin-files/XA,ZZ.svg").await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        get(&app, "/api/v1/maps/twin-files/XA.svg?regions=XB")
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+
+    // The same map from a recipe.
+    let recipe = "# two regions\nkey,value\ndataset,twin-files\nregion,XB\nregion,XA\nwidth,400\n";
+    let r = send(
+        &app,
+        Request::post("/api/v1/render")
+            .header(header::CONTENT_TYPE, "text/csv")
+            .body(Body::from(recipe))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.body, a.body);
+    let bad = send(
+        &app,
+        Request::post("/api/v1/render")
+            .header(header::CONTENT_TYPE, "text/csv")
+            .body(Body::from(
+                "key,value\ndataset,twin-files\nregion,XA\ncolour-water,red\n",
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    assert!(bad.json()["detail"]
+        .as_str()
+        .unwrap()
+        .contains("colour-water"));
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -45,10 +45,10 @@ const regions = await api.features("ne-admin1", "FRA"); // codes, names, parents
 | `GET /api/v1/datasets` | Hosted datasets: level, licence, share-alike, release, boundary year, points of view, languages |
 | `GET /api/v1/datasets/{dataset}/regions` | What a map can be made for: countries, continents, `world`… with each one's licence |
 | `GET /api/v1/datasets/{dataset}/regions/{region}/features` | The map's regions without geometry: `code`, `name`, `names` (`?languages=fr,zh-Hant`), `parent`, `parentName`, `country` |
-| `GET /api/v1/maps/{dataset}/{region}.svg` | The map |
+| `GET /api/v1/maps/{dataset}/{region}.svg` | The map. `{region}` can list several regions, by code or name: `/maps/ne-admin0/BEL,LUX,NLD.svg` |
 | `GET /api/v1/maps/{dataset}/{region}.json` | Its metadata (below) |
 | `GET /api/v1/maps/{dataset}/{region}.html` | An interactive page with colour pickers |
-| `POST /api/v1/render` | The same, with a JSON body: `{"dataset", "region", "worldview"?, "spec": RenderSpec}` |
+| `POST /api/v1/render` | The same, with a JSON body `{"dataset", "region", "worldview"?, "spec": RenderSpec}`, or a [map recipe](recipes.md) (`Content-Type: text/csv`) |
 | `POST /api/v1/match` | Compare a data table's codes with a map |
 | `GET /api/v1/crosswalks`, `/crosswalks/{id}.csv` | Hosted crosswalks between boundary versions |
 | `POST /api/v1/reshape` | Move a data table to new codes through a crosswalk |
