@@ -633,7 +633,7 @@ pub struct Sources<'a> {
 
 impl Sources<'_> {
     /// Distinct layer credits, in subject/context/lakes order.
-    fn credits(&self) -> Option<String> {
+    pub fn credits(&self) -> Option<String> {
         let mut out: Vec<&str> = Vec::new();
         let layers = [
             Some(self.subject),

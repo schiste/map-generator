@@ -26,6 +26,18 @@ jobs:
       - run: cargo test --workspace
       - run: cargo test -p mapgen-data --no-default-features
 
+  # The API's static assets: openapi.json matches its generator, client.js parses.
+  api-assets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: openapi.json is generated from openapi.py
+        run: python3 crates/mapgen-server/assets/openapi.py && git diff --exit-code crates/mapgen-server/assets/openapi.json
+      - run: node --check crates/mapgen-server/assets/client.js
+
   # Rebuilds docs/examples from pinned real data on every OS and requires the
   # output to be byte-identical to the committed gallery.
   gallery:

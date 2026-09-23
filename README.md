@@ -165,6 +165,21 @@ Other useful flags: `--width`, `--padding`, `--simplify` (px), `--min-area` (pxÂ
 `--no-curved-labels`, `--label-min-scale`, `--parent-column`, `--name-column name_fr` (Natural Earth
 ships names in about 40 languages), and `--attribution` / `--credit`, and `--metadata out.json` (size, insets, SHA-1, and `legendSlots`: the empty areas where a legend or title can go). Run `mapgen render --help` for the full list.
 
+## Public API
+
+`https://map-generator.toolforge.org/api/v1/` serves the same maps over HTTP. It also serves
+their metadata (region codes and names, legend slots, SHA-1, credit, licence, boundary
+version) and data joins (`match`, and `reshape` through hosted crosswalks). It is read-only
+and anonymous, with open CORS and an OpenAPI description, and a dependency-free JS client is
+served alongside it:
+
+```js
+import { MapgenClient } from "https://map-generator.toolforge.org/api/v1/client.js";
+const svg = await new MapgenClient().map("ne-admin1", "FRA", { labels: true });
+```
+
+See [docs/api.md](docs/api.md); the server is `crates/mapgen-server`.
+
 ## In the browser (WebAssembly)
 
 The same engine runs in the browser and Node.js through

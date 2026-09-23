@@ -12,6 +12,17 @@
    stripped (`svg::fmt_num`). Golden tests and `scripts/build-examples.sh` enforce this.
 3. **Load only what you draw.** GeoPackage filters run in SQL and rows are streamed.
 
+## Crates
+
+| Crate | Role |
+| --- | --- |
+| `mapgen-core` | the pipeline, with no I/O |
+| `mapgen-data` | readers and writers (GeoJSON, GeoPackage, tables), crosswalks, data joins |
+| `mapgen-spec` | the JSON options (`RenderSpec`, `LayerSpec`, match and reshape specs) shared by WASM and the API, so one JSON gives one map everywhere |
+| `mapgen-cli` | the `mapgen` binary |
+| `mapgen-wasm` | the WebAssembly build (wasm-bindgen, TypeScript types, playground) |
+| `mapgen-server` | the public HTTP API: a dataset registry, disk cache and problem+json errors on top of `mapgen-spec` ([api.md](api.md)) |
+
 ## Stages
 
 ### 1. Frame and insets (`frame.rs`, `pipeline.rs`)

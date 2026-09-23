@@ -1,0 +1,1354 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "map-generator API",
+  "version": "1",
+  "description": "Deterministic SVG maps from open data, their metadata, and data joins across boundary versions. Read-only and anonymous. See https://github.com/schiste/map-generator/blob/main/docs/api.md",
+  "license": {
+   "name": "MIT",
+   "identifier": "MIT"
+  }
+ },
+ "servers": [
+  {
+   "url": "https://map-generator.toolforge.org"
+  }
+ ],
+ "paths": {
+  "/api/v1/": {
+   "get": {
+    "summary": "Links to every endpoint",
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/openapi.json": {
+   "get": {
+    "summary": "This description",
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/client.js": {
+   "get": {
+    "summary": "A dependency-free ES module client",
+    "responses": {
+     "200": {
+      "description": "JavaScript",
+      "content": {
+       "text/javascript": {}
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/health": {
+   "get": {
+    "summary": "200 when the data is loaded",
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "status": {
+           "type": "string"
+          },
+          "datasets": {
+           "type": "integer"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/version": {
+   "get": {
+    "summary": "mapgen version, commit, SVG contract version, dataset releases",
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/themes": {
+   "get": {
+    "summary": "Built-in themes: { name: { slot: colour } }",
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/bbox-presets": {
+   "get": {
+    "summary": "Frame presets: { name: [west, south, east, north] }",
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/datasets": {
+   "get": {
+    "summary": "Hosted datasets",
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/Dataset"
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/datasets/{dataset}/regions": {
+   "get": {
+    "summary": "Regions a map can be made for",
+    "parameters": [
+     {
+      "name": "dataset",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      },
+      "example": "ne-admin1"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/Region"
+         }
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown dataset",
+      "content": {
+       "application/problem+json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/datasets/{dataset}/regions/{region}/features": {
+   "get": {
+    "summary": "The regions of a map, without geometry: codes, names, parents",
+    "parameters": [
+     {
+      "name": "dataset",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      },
+      "example": "ne-admin1"
+     },
+     {
+      "name": "region",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      },
+      "example": "FRA"
+     },
+     {
+      "name": "languages",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "Comma-separated BCP 47 tags, e.g. `fr,zh-Hant`."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/Feature"
+         }
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown dataset or region",
+      "content": {
+       "application/problem+json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/maps/{dataset}/{file}": {
+   "get": {
+    "summary": "A map",
+    "description": "`file` is `{region}.svg` (the map), `{region}.json` (its metadata) or `{region}.html` (interactive page with colour pickers). Unknown or misspelled parameters are errors.",
+    "parameters": [
+     {
+      "name": "dataset",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      },
+      "example": "ne-admin1"
+     },
+     {
+      "name": "file",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      },
+      "example": "FRA.svg"
+     },
+     {
+      "name": "width",
+      "in": "query",
+      "schema": {
+       "type": "integer"
+      },
+      "description": "Width in pixels (at most 4000; default 1000)."
+     },
+     {
+      "name": "padding",
+      "in": "query",
+      "schema": {
+       "type": "integer"
+      },
+      "description": "Padding in pixels."
+     },
+     {
+      "name": "precision",
+      "in": "query",
+      "schema": {
+       "type": "integer"
+      },
+      "description": "Decimal places of coordinates (default 1)."
+     },
+     {
+      "name": "title",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "Document title."
+     },
+     {
+      "name": "attribution",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "Data credit (default: from the data)."
+     },
+     {
+      "name": "credit",
+      "in": "query",
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Draw the credit in the bottom-right corner."
+     },
+     {
+      "name": "boundary-year",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "Year the boundaries represent (default: from the data)."
+     },
+     {
+      "name": "source-release",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "Dataset release (default: the hosted one)."
+     },
+     {
+      "name": "theme",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "`wikimedia` (default), `light`, `dark` or `mono`."
+     },
+     {
+      "name": "labels",
+      "in": "query",
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Label the regions."
+     },
+     {
+      "name": "languages",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "Also label in these languages (comma-separated BCP 47 tags)."
+     },
+     {
+      "name": "target",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "`commons` (default for SVG; curved labels as rotated letters, for librsvg) or `web` (textPath)."
+     },
+     {
+      "name": "border-mode",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "`layer` (default) or `regions`."
+     },
+     {
+      "name": "css-vars",
+      "in": "query",
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Colours as `var(--mg-<slot>, …)`."
+     },
+     {
+      "name": "frame",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "`auto`, `all` or `world`."
+     },
+     {
+      "name": "bbox",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "`west,south,east,north` or a preset name (see /bbox-presets)."
+     },
+     {
+      "name": "projection",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "`auto`, `laea`, `equal-earth`, `albers`, `lcc`."
+     },
+     {
+      "name": "parallels",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "Standard parallels for albers/lcc: `south,north`."
+     },
+     {
+      "name": "center-lon",
+      "in": "query",
+      "schema": {
+       "type": "number"
+      },
+      "description": "Central meridian."
+     },
+     {
+      "name": "insets",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "`auto` (default) or `none`."
+     },
+     {
+      "name": "max-insets",
+      "in": "query",
+      "schema": {
+       "type": "integer"
+      },
+      "description": "At most this many insets."
+     },
+     {
+      "name": "leaders",
+      "in": "query",
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Leader lines for small regions' labels (default true)."
+     },
+     {
+      "name": "curved-labels",
+      "in": "query",
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Curve labels along long, thin regions (default true)."
+     },
+     {
+      "name": "label-size",
+      "in": "query",
+      "schema": {
+       "type": "number"
+      },
+      "description": "Label size in pixels."
+     },
+     {
+      "name": "label-min-scale",
+      "in": "query",
+      "schema": {
+       "type": "number"
+      },
+      "description": "Smallest label size as a fraction of label-size."
+     },
+     {
+      "name": "border-width",
+      "in": "query",
+      "schema": {
+       "type": "number"
+      }
+     },
+     {
+      "name": "parent-border-width",
+      "in": "query",
+      "schema": {
+       "type": "number"
+      }
+     },
+     {
+      "name": "outline-width",
+      "in": "query",
+      "schema": {
+       "type": "number"
+      }
+     },
+     {
+      "name": "context-border-width",
+      "in": "query",
+      "schema": {
+       "type": "number"
+      }
+     },
+     {
+      "name": "disputed-border-width",
+      "in": "query",
+      "schema": {
+       "type": "number"
+      }
+     },
+     {
+      "name": "snap",
+      "in": "query",
+      "schema": {
+       "type": "number"
+      },
+      "description": "Snap neighbours within this many pixels onto the outline."
+     },
+     {
+      "name": "simplify",
+      "in": "query",
+      "schema": {
+       "type": "number"
+      },
+      "description": "Simplification tolerance in pixels."
+     },
+     {
+      "name": "min-area",
+      "in": "query",
+      "schema": {
+       "type": "number"
+      },
+      "description": "Drop islands and lakes smaller than this many px²."
+     },
+     {
+      "name": "margin",
+      "in": "query",
+      "schema": {
+       "type": "number"
+      },
+      "description": "Room around the frame, as a fraction of its size."
+     },
+     {
+      "name": "worldview",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "Natural Earth point of view for disputed borders, e.g. `IND` (see /datasets: worldviews)."
+     },
+     {
+      "name": "release",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "Pin the URL to a dataset release: the response is then cached as immutable; 404 once that release is gone."
+     },
+     {
+      "name": "color-{slot}",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      },
+      "description": "Colour of a slot, e.g. `color-water=%23c6ecff` (slots: /themes)."
+     },
+     {
+      "name": "If-None-Match",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "The map",
+      "headers": {
+       "ETag": {
+        "description": "SHA-1 of the body, as Commons stores it.",
+        "schema": {
+         "type": "string"
+        }
+       },
+       "Content-Location": {
+        "description": "Canonical URL of this map.",
+        "schema": {
+         "type": "string"
+        }
+       },
+       "X-Mapgen-Version": {
+        "schema": {
+         "type": "string"
+        }
+       },
+       "X-Mapgen-Contract": {
+        "description": "SVG contract version (docs/contract.md).",
+        "schema": {
+         "type": "string"
+        }
+       },
+       "X-Dataset-Release": {
+        "schema": {
+         "type": "string"
+        }
+       },
+       "Link": {
+        "description": "`<licence url>; rel=\"license\"`",
+        "schema": {
+         "type": "string"
+        }
+       }
+      },
+      "content": {
+       "image/svg+xml": {},
+       "text/html": {},
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/MapMetadata"
+        }
+       }
+      }
+     },
+     "304": {
+      "description": "Not modified (ETag)"
+     },
+     "400": {
+      "description": "Invalid parameter",
+      "content": {
+       "application/problem+json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown dataset, region, format, release or point of view",
+      "content": {
+       "application/problem+json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "Busy or too slow: retry after Retry-After seconds",
+      "content": {
+       "application/problem+json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/render": {
+   "post": {
+    "summary": "A map from a JSON render spec",
+    "description": "Same as the map GET, with the WASM `RenderSpec` (camelCase) as JSON. `Accept: application/json` returns the metadata plus `svg`.",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RenderRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "SVG, HTML (spec.format = html) or JSON",
+      "content": {
+       "image/svg+xml": {},
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/MapMetadata"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid spec",
+      "content": {
+       "application/problem+json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown dataset or region",
+      "content": {
+       "application/problem+json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "Busy",
+      "content": {
+       "application/problem+json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/match": {
+   "post": {
+    "summary": "Compare a data table's codes with a map's regions",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/MatchRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/MatchOutput"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid request",
+      "content": {
+       "application/problem+json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Unknown dataset or region",
+      "content": {
+       "application/problem+json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/crosswalks": {
+   "get": {
+    "summary": "Hosted crosswalks between boundary versions",
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "type": "object"
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/crosswalks/{file}": {
+   "get": {
+    "summary": "A hosted crosswalk: `{id}.csv` (from,to,weight) or `{id}.json` (metadata)",
+    "parameters": [
+     {
+      "name": "file",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      },
+      "example": "us-counties-2010-2020.csv"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "CSV or JSON",
+      "content": {
+       "text/csv": {},
+       "application/json": {}
+      }
+     },
+     "404": {
+      "description": "Unknown crosswalk",
+      "content": {
+       "application/problem+json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/reshape": {
+   "post": {
+    "summary": "Move a data table to new codes through a crosswalk",
+    "description": "Renames and merges are applied, splits shared out by weight. Values that need a rule give 422 with `conflicts`, unless `allowConflicts`. `Accept: text/csv` returns the table only.",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ReshapeSpec"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Reshaped",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ReshapeOutput"
+        }
+       },
+       "text/csv": {}
+      }
+     },
+     "400": {
+      "description": "Invalid request",
+      "content": {
+       "application/problem+json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Values need a decision (see `conflicts`)",
+      "content": {
+       "application/problem+json": {
+        "schema": {
+         "$ref": "#/components/schemas/Problem"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/contract/fixture.svg": {
+   "get": {
+    "summary": "A small map following the SVG contract, for consumers' tests",
+    "responses": {
+     "200": {
+      "description": "SVG",
+      "content": {
+       "image/svg+xml": {}
+      }
+     }
+    }
+   }
+  }
+ },
+ "components": {
+  "schemas": {
+   "Problem": {
+    "type": "object",
+    "properties": {
+     "type": {
+      "type": "string"
+     },
+     "title": {
+      "type": "string"
+     },
+     "status": {
+      "type": "integer"
+     },
+     "detail": {
+      "type": "string"
+     },
+     "param": {
+      "type": "string"
+     }
+    }
+   },
+   "Provenance": {
+    "type": "object",
+    "properties": {
+     "credit": {
+      "type": "string"
+     },
+     "licence": {
+      "type": "string"
+     },
+     "licenceUrl": {
+      "type": "string"
+     },
+     "shareAlike": {
+      "type": "boolean"
+     },
+     "release": {
+      "type": "string"
+     },
+     "boundaryYear": {
+      "type": "string"
+     }
+    }
+   },
+   "Dataset": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "title": {
+      "type": "string"
+     },
+     "level": {
+      "type": "string"
+     },
+     "regions": {
+      "type": "integer"
+     },
+     "world": {
+      "type": "boolean"
+     },
+     "worldviews": {
+      "type": "boolean"
+     },
+     "languages": {
+      "type": "boolean"
+     },
+     "credit": {
+      "type": "string"
+     },
+     "licence": {
+      "type": "string"
+     },
+     "licenceUrl": {
+      "type": "string"
+     },
+     "shareAlike": {
+      "type": "boolean"
+     },
+     "release": {
+      "type": "string"
+     },
+     "boundaryYear": {
+      "type": "string"
+     },
+     "licencePerRegion": {
+      "type": "boolean",
+      "description": "Licences differ per region: see /regions."
+     }
+    }
+   },
+   "Region": {
+    "type": "object",
+    "properties": {
+     "code": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "region",
+       "continent",
+       "world",
+       "file"
+      ]
+     },
+     "provenance": {
+      "$ref": "#/components/schemas/Provenance"
+     }
+    }
+   },
+   "Feature": {
+    "type": "object",
+    "properties": {
+     "code": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     },
+     "names": {
+      "type": "object",
+      "additionalProperties": {
+       "type": "string"
+      }
+     },
+     "parent": {
+      "type": "string"
+     },
+     "parentName": {
+      "type": "string"
+     },
+     "country": {
+      "type": "string",
+      "description": "Lowercase ISO 3166-1 alpha-2"
+     },
+     "units": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    }
+   },
+   "LegendSlot": {
+    "type": "object",
+    "properties": {
+     "position": {
+      "type": "string"
+     },
+     "x": {
+      "type": "number"
+     },
+     "y": {
+      "type": "number"
+     },
+     "width": {
+      "type": "number"
+     },
+     "height": {
+      "type": "number"
+     },
+     "landShare": {
+      "type": "number"
+     }
+    }
+   },
+   "MapMetadata": {
+    "type": "object",
+    "properties": {
+     "width": {
+      "type": "integer"
+     },
+     "height": {
+      "type": "integer"
+     },
+     "projection": {
+      "type": "string"
+     },
+     "center": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      }
+     },
+     "regions": {
+      "type": "integer"
+     },
+     "outsideFrame": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "insets": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "ids": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        },
+        "projection": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     "legendSlots": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/LegendSlot"
+      }
+     },
+     "contract": {
+      "type": "integer"
+     },
+     "dataset": {
+      "type": "string"
+     },
+     "region": {
+      "type": "string"
+     },
+     "sha1": {
+      "type": "string"
+     },
+     "credit": {
+      "type": "string"
+     },
+     "licence": {
+      "type": "string"
+     },
+     "licenceUrl": {
+      "type": "string"
+     },
+     "shareAlike": {
+      "type": "boolean"
+     },
+     "boundaryYear": {
+      "type": "string"
+     },
+     "sourceRelease": {
+      "type": "string"
+     },
+     "release": {
+      "type": "string"
+     },
+     "url": {
+      "type": "string"
+     },
+     "svg": {
+      "type": "string",
+      "description": "POST /render with Accept: application/json only"
+     }
+    }
+   },
+   "RenderRequest": {
+    "type": "object",
+    "required": [
+     "dataset",
+     "region"
+    ],
+    "properties": {
+     "dataset": {
+      "type": "string"
+     },
+     "region": {
+      "type": "string"
+     },
+     "worldview": {
+      "type": "string"
+     },
+     "spec": {
+      "type": "object",
+      "description": "The WASM RenderSpec (camelCase; see crates/mapgen-wasm TypeScript types)."
+     }
+    }
+   },
+   "MatchRequest": {
+    "type": "object",
+    "required": [
+     "dataset",
+     "region"
+    ],
+    "properties": {
+     "dataset": {
+      "type": "string"
+     },
+     "region": {
+      "type": "string"
+     },
+     "table": {
+      "type": "string",
+      "description": "CSV, TSV or pipe-separated"
+     },
+     "codeColumn": {
+      "type": "string",
+      "default": "code"
+     },
+     "codes": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "codePrefix": {
+      "type": "string"
+     }
+    }
+   },
+   "MatchOutput": {
+    "type": "object",
+    "properties": {
+     "matched": {
+      "type": "integer"
+     },
+     "dataNotOnMap": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "mapWithoutData": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "missingShare": {
+      "type": "number"
+     },
+     "hints": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "crosswalk": {
+         "type": "string"
+        },
+        "direction": {
+         "type": "string",
+         "enum": [
+          "old-data",
+          "new-data"
+         ]
+        },
+        "codes": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        },
+        "message": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    }
+   },
+   "ReshapeSpec": {
+    "type": "object",
+    "required": [
+     "table",
+     "codeColumn",
+     "crosswalk"
+    ],
+    "properties": {
+     "table": {
+      "type": "string"
+     },
+     "codeColumn": {
+      "type": "string"
+     },
+     "columns": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "crosswalk": {
+      "oneOf": [
+       {
+        "type": "string",
+        "description": "Hosted crosswalk id"
+       },
+       {
+        "type": "object",
+        "properties": {
+         "table": {
+          "type": "string"
+         },
+         "fromColumn": {
+          "type": "string"
+         },
+         "toColumn": {
+          "type": "string"
+         },
+         "weightColumn": {
+          "type": "string"
+         }
+        }
+       }
+      ]
+     },
+     "complete": {
+      "type": "boolean"
+     },
+     "allowConflicts": {
+      "type": "boolean"
+     }
+    }
+   },
+   "ReshapeOutput": {
+    "type": "object",
+    "properties": {
+     "csv": {
+      "type": "string"
+     },
+     "conflicts": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "from": {
+         "type": "string"
+        },
+        "targets": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        },
+        "reason": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     "direct": {
+      "type": "integer"
+     },
+     "weighted": {
+      "type": "integer"
+     },
+     "columns": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    }
+   }
+  }
+ }
+}

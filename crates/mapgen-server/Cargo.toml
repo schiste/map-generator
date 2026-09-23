@@ -1,0 +1,26 @@
+[package]
+name = "mapgen-server"
+description = "map-generator's public HTTP API (https://map-generator.toolforge.org/api/v1/)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+mapgen-core.workspace = true
+mapgen-data = { workspace = true, features = ["gpkg"] }
+mapgen-spec.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "fs"] }
+tower-http = { version = "0.6", features = ["cors", "compression-gzip", "fs"] }
+toml = "0.8"
+sha1_smol = "1"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
