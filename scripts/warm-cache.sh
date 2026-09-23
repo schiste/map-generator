@@ -5,14 +5,24 @@
 #
 #   scripts/warm-cache.sh https://map-generator.toolforge.org/api/v1
 #
-# Sequential and polite: one request at a time.
+# Sequential and polite: one request at a time. CURL overrides the curl
+# binary (default: curl on PATH).
 set -euo pipefail
 base="${1:-http://localhost:8000/api/v1}"
+curl="${CURL:-curl}"
+json_list() { # url python-expression-over-d
+  local body
+  body="$("$curl" -fsS "$1")"
+  python3 -c "import json,sys,urllib.parse; d=json.loads(sys.argv[1]); print(' '.join($2))" "$body"
+}
+datasets="$(json_list "$base/datasets" 'x["id"] for x in d')"
+[[ -n "$datasets" ]] || { echo "no datasets at $base" >&2; exit 1; }
 ok=0 failed=0
-for dataset in $(curl -fsS "$base/datasets" | python3 -c 'import json,sys; print(" ".join(d["id"] for d in json.load(sys.stdin)))'); do
-  for region in $(curl -fsS "$base/datasets/$dataset/regions" | python3 -c 'import json,sys,urllib.parse; print(" ".join(urllib.parse.quote(r["code"]) for r in json.load(sys.stdin)))'); do
+for dataset in $datasets; do
+  regions="$(json_list "$base/datasets/$dataset/regions" 'urllib.parse.quote(x["code"]) for x in d')"
+  for region in $regions; do
     for q in "" "labels=true"; do
-      if curl -fsS -o /dev/null "$base/maps/$dataset/$region.svg${q:+?$q}"; then
+      if "$curl" -fsS -o /dev/null "$base/maps/$dataset/$region.svg${q:+?$q}"; then
         ok=$((ok + 1))
       else
         failed=$((failed + 1))
@@ -20,5 +30,7 @@ for dataset in $(curl -fsS "$base/datasets" | python3 -c 'import json,sys; print
       fi
     done
   done
+  echo "$dataset: done ($ok ok, $failed failed so far)"
 done
 echo "warmed $ok map(s), $failed failure(s)"
+[[ "$failed" -eq 0 ]]
