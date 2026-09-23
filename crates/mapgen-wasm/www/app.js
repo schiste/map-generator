@@ -560,8 +560,12 @@ async function applyRecipe(text) {
     renderCountryList();
     render();
     const noun = mode === "mixed" ? ["region", "regions"] : ["country", "countries"];
-    report.textContent = `Applied: ${codes.length} ${noun[codes.length === 1 ? 0 : 1]}`
-      + (unknown.length ? `. Not found: ${unknown.join(", ")}.` : ".");
+    // A pasted {{Choropleth map}} says what it couldn't carry over.
+    report.textContent = [
+      `Applied: ${codes.length} ${noun[codes.length === 1 ? 0 : 1]}`
+        + (unknown.length ? `. Not found: ${unknown.join(", ")}.` : "."),
+      ...(recipe.notes || []).map((note) => `${note[0].toUpperCase()}${note.slice(1)}.`),
+    ].join(" ");
     report.classList.toggle("has-issues", unknown.length > 0);
   } catch (e) {
     report.textContent = messageOf(e);

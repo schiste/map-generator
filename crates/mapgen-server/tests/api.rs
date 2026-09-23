@@ -727,6 +727,10 @@ async fn mixed_levels_countries_and_single_subdivisions() {
             // No ISO 3166-2 code: read back by adm1_code.
             sub("-99", "FRA-5", "FRA", "FR", "Clipperton", 14.0),
             sub("DE-BY", "DEU-1", "DEU", "DE", "Bayern", 10.2),
+            // Two Nords: a name for colouring tools to pick by context.
+            sub("FR-59", "FRA-59", "FRA", "FR", "Nord", 18.0),
+            sub("CM-NO", "CMR-1", "CMR", "CM", "Nord", 20.0),
+            sub("FR-29", "FRA-29", "FRA", "FR", "Finistère", 22.0),
         ]),
     )
     .unwrap();
@@ -761,6 +765,26 @@ async fn mixed_levels_countries_and_single_subdivisions() {
     // Names in other languages reach single subdivisions too.
     let r = get(&app, "/api/v1/maps/mixed/Clipperton%20(fr).svg").await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    // A Wikipedia {{Choropleth map}} pasted as a recipe: its entities by
+    // Wikipedia title, values kept aside, Nord taken among its neighbours.
+    let r = send(
+        &app,
+        Request::post("/api/v1/render")
+            .header(header::CONTENT_TYPE, "text/csv")
+            .body(Body::from(
+                "{{Choropleth map\n| entities =\n#aaf: Finistère\n#faa: Nord (French department)\n| caption = Two [[Departments of France|départements]]\n}}",
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let svg = r.text();
+    assert!(
+        svg.contains("data-code=\"FR-59\"") && svg.contains("data-code=\"FR-29\""),
+        "{svg}"
+    );
+    assert!(!svg.contains("data-code=\"CM-NO\""));
+    assert!(svg.contains(">Two départements</"), "caption as plain text");
     // A country and one of its own subdivisions would overlap.
     let r = get(&app, "/api/v1/maps/mixed/DEU,DE-BY.svg").await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);

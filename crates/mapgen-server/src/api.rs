@@ -364,38 +364,70 @@ struct Selection<'a> {
 
 /// Resolves `FRA`, `FRA,DEU,ITA` or names (`France,Germany`) to regions.
 fn select<'a>(d: &'a DatasetEntry, spec: &str) -> ApiResult<Selection<'a>> {
-    let one = |input: &str| -> ApiResult<&'a Region> {
-        let input = input.trim();
+    // Every region an input can mean: a code, else names and aliases.
+    let lookup = |input: &str| -> Vec<&'a Region> {
+        if let Some(r) = d.regions.get(input).or_else(|| {
+            d.regions
+                .values()
+                .find(|r| r.code.eq_ignore_ascii_case(input))
+        }) {
+            return vec![r];
+        }
+        let lower = input.to_lowercase();
         d.regions
-            .get(input)
-            .or_else(|| {
-                let lower = input.to_lowercase();
-                let code = d
-                    .regions
-                    .values()
-                    .find(|r| r.code.eq_ignore_ascii_case(input));
-                code.or_else(|| {
-                    d.regions
-                        .values()
-                        .filter(|r| r.name.to_lowercase() == lower || r.aliases.contains(&lower))
-                        .min_by_key(|r| r.level)
-                })
-            })
-            .ok_or_else(|| {
-                ApiError::not_found(format!(
-                    "no region {input:?} in {}: see /api/v1/datasets/{}/regions",
-                    d.config.id, d.config.id
-                ))
-            })
+            .values()
+            .filter(|r| r.name.to_lowercase() == lower || r.aliases.contains(&lower))
+            .collect()
     };
-    let mut regions = match d.regions.get(spec) {
-        Some(r) => vec![r],
+    let candidates = |input: &str| -> Vec<&'a Region> {
+        let found = lookup(input);
+        if !found.is_empty() {
+            return found;
+        }
+        // Wikipedia titles: `New York (state)` is New York.
+        mapgen_spec::wikitext::without_disambiguation(input)
+            .map(lookup)
+            .unwrap_or_default()
+    };
+    // The country a subdivision of a mixed dataset is in (`FR-59` → FR).
+    let country =
+        |r: &Region| (r.level > 0).then(|| r.code.split('-').next().unwrap_or("").to_owned());
+    let inputs: Vec<&str> = match d.regions.get(spec) {
+        Some(_) => vec![spec],
         None => spec
             .split(',')
-            .filter(|p| !p.trim().is_empty())
-            .map(one)
-            .collect::<ApiResult<Vec<_>>>()?,
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .collect(),
     };
+    let resolved: Vec<Vec<&'a Region>> = inputs.iter().map(|i| candidates(i)).collect();
+    let mut shared: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for c in resolved.iter().filter(|c| c.len() == 1) {
+        if let Some(k) = country(c[0]) {
+            *shared.entry(k).or_default() += 1;
+        }
+    }
+    // A name shared by several regions: a country before a subdivision
+    // (Luxembourg), then the country most other inputs are in (Nord among
+    // French départements is France's), then the first by code.
+    let mut regions = Vec::new();
+    for (input, candidates) in inputs.iter().zip(resolved) {
+        let pick = candidates.into_iter().min_by_key(|r| {
+            let n = country(r)
+                .and_then(|k| shared.get(&k).copied())
+                .unwrap_or(0);
+            (r.level, std::cmp::Reverse(n), r.code.clone())
+        });
+        match pick {
+            Some(r) => regions.push(r),
+            None => {
+                return Err(ApiError::not_found(format!(
+                    "no region {input:?} in {}: see /api/v1/datasets/{}/regions",
+                    d.config.id, d.config.id
+                )))
+            }
+        }
+    }
     regions.sort_by(|a, b| a.code.cmp(&b.code));
     regions.dedup_by(|a, b| a.code == b.code);
     if regions.is_empty() {

@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 pub mod options;
 pub mod params;
 pub mod recipe;
+pub mod wikitext;
 
 /// Error surfaced to JavaScript as an `Error` with this message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -308,7 +309,11 @@ impl LoadedLayer {
         }
         let (mut found, mut unknown) = (Vec::new(), Vec::new());
         for input in inputs {
-            match lookup.get(&norm(input)) {
+            // Wikipedia titles: `New York (state)` is New York.
+            let hit = lookup.get(&norm(input)).or_else(|| {
+                crate::wikitext::without_disambiguation(input).and_then(|t| lookup.get(&norm(t)))
+            });
+            match hit {
                 Some(code) if !found.contains(code) => found.push(code.clone()),
                 Some(_) => {}
                 None => unknown.push(input.clone()),
@@ -318,27 +323,68 @@ impl LoadedLayer {
     }
 
     /// Single features for what people type: codes (`FR-75`, any case),
-    /// names in any language loaded, Wikidata items. A name shared by
-    /// several features picks the first by code; codes are unambiguous.
-    /// Returns the codes found and the inputs that matched nothing.
+    /// names in any language loaded, Wikidata items, Wikipedia titles
+    /// (`Nord (French department)` is looked up as `Nord`). A name shared
+    /// by several features picks the one in the country most of the other
+    /// inputs are in (Nord among French départements is France's), else the
+    /// first by code; codes are unambiguous. Returns the codes found and the
+    /// inputs that matched nothing.
     pub fn find_features(&self, inputs: &[String]) -> (Vec<String>, Vec<String>) {
         let norm = |s: &str| s.trim().to_lowercase();
-        let mut lookup: BTreeMap<String, &str> = BTreeMap::new();
+        let mut by_id: BTreeMap<String, &MapFeature> = BTreeMap::new();
+        let mut by_name: BTreeMap<String, Vec<&MapFeature>> = BTreeMap::new();
         for f in self.features() {
+            by_id.entry(norm(&f.id)).or_insert(f);
             for key in std::iter::once(&f.name)
                 .chain(f.names.values())
                 .chain(f.wikidata.as_ref())
             {
-                lookup.entry(norm(key)).or_insert(&f.id);
+                let list = by_name.entry(norm(key)).or_default();
+                if !list.iter().any(|g| g.id == f.id) {
+                    list.push(f);
+                }
             }
         }
-        for f in self.features() {
-            lookup.insert(norm(&f.id), &f.id);
+        let candidates = |input: &str| -> Vec<&MapFeature> {
+            let try_one = |s: &str| -> Vec<&MapFeature> {
+                match by_id.get(&norm(s)) {
+                    Some(f) => vec![*f],
+                    None => by_name.get(&norm(s)).cloned().unwrap_or_default(),
+                }
+            };
+            let direct = try_one(input);
+            if !direct.is_empty() {
+                return direct;
+            }
+            crate::wikitext::without_disambiguation(input)
+                .map(try_one)
+                .unwrap_or_default()
+        };
+        let resolved: Vec<Vec<&MapFeature>> = inputs.iter().map(|i| candidates(i)).collect();
+        // Countries of the unambiguous inputs, by how many.
+        let mut countries: BTreeMap<&str, usize> = BTreeMap::new();
+        for c in resolved.iter().filter(|c| c.len() == 1) {
+            if let Some(country) = c[0].country.as_deref() {
+                *countries.entry(country).or_default() += 1;
+            }
         }
         let (mut found, mut unknown) = (Vec::new(), Vec::new());
-        for input in inputs {
-            match lookup.get(&norm(input)) {
-                Some(code) if !found.iter().any(|c| c == code) => found.push((*code).to_owned()),
+        for (input, candidates) in inputs.iter().zip(resolved) {
+            let pick = candidates
+                .iter()
+                .max_by_key(|f| {
+                    let n = f
+                        .country
+                        .as_deref()
+                        .and_then(|c| countries.get(c))
+                        .copied()
+                        .unwrap_or(0);
+                    // Most shared country first; then the first by code.
+                    (n, std::cmp::Reverse(f.id.clone()))
+                })
+                .map(|f| f.id.clone());
+            match pick {
+                Some(code) if !found.contains(&code) => found.push(code),
                 Some(_) => {}
                 None => unknown.push(input.clone()),
             }

@@ -77,6 +77,17 @@ test("recipes: parse, validate, and write back", () => {
   assert.deepEqual(parseRecipe("country,category\nFrance,A\n").regions, ["France"]);
 });
 
+test("recipes read Wikipedia's {{Choropleth map}}", () => {
+  const r = parseRecipe("Intro.\n{{Choropleth map\n| view = South America\n| height = 300\n| countries =\n400: BR\n#aff: SR; GY\n| legends = yes\n}}");
+  assert.equal(r.dataset, "ne-admin0");
+  assert.deepEqual(r.regions, ["BR", "SR", "GY"]);
+  assert.deepEqual(r.values, [{ region: "BR", value: "400" }, { region: "SR", value: "#aff" }, { region: "GY", value: "#aff" }]);
+  assert.deepEqual(r.spec, { bbox: "south-america", height: 1200 });
+  assert.ok(r.notes.some((n) => n.includes("legends")));
+  // Written back, it is an ordinary recipe.
+  assert.match(recipeToCsv(r), /dataset,ne-admin0\nregion,BR\n/);
+});
+
 test("errors are thrown as Error with helpful messages", () => {
   assert.throws(() => new MapGenerator().render(), { message: /setSubject/ });
   const gen = twinGenerator();

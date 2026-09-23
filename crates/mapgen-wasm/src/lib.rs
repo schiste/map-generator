@@ -259,7 +259,8 @@ export interface Country {
 
 /**
  * A map recipe (docs/recipes.md): which regions and every design setting,
- * as a key,value CSV that spreadsheets can edit.
+ * as a key,value CSV that spreadsheets can edit, or read from the wikitext
+ * of Wikipedia's {{Choropleth map}} template.
  */
 export interface Recipe {
   /** "ne-admin0" (alias "countries"), "ne-admin1" ("subdivisions"), or an API dataset id. */
@@ -269,6 +270,13 @@ export interface Recipe {
   worldview?: string;
   /** The design settings as a RenderSpec. */
   spec: RenderSpec;
+  /**
+   * Values or colours given per region, from a pasted {{Choropleth map}}
+   * (`400: Brazil`, `#faa: Mexico`), for colouring tools; not drawn.
+   */
+  values?: { region: string; value: string }[];
+  /** What a pasted {{Choropleth map}} couldn't carry over, and why. */
+  notes?: string[];
 }
 
 /** A data table, or codes, to compare with the map. */
@@ -732,6 +740,8 @@ pub fn parse_recipe(text: &str) -> Result<JsValue, JsError> {
         "regions": recipe.regions,
         "worldview": recipe.worldview,
         "spec": parsed.spec,
+        "values": recipe.values.iter().map(|(region, value)| serde_json::json!({ "region": region, "value": value })).collect::<Vec<_>>(),
+        "notes": recipe.notes,
     }))
 }
 
@@ -749,6 +759,11 @@ pub fn recipe_to_csv(
         worldview: Option<String>,
         #[serde(default)]
         spec: serde_json::Map<String, serde_json::Value>,
+        // Read by parseRecipe; not part of the written recipe.
+        #[serde(default, rename = "values")]
+        _values: serde_json::Value,
+        #[serde(default, rename = "notes")]
+        _notes: serde_json::Value,
     }
     let json: String = js_sys::JSON::stringify(&recipe.into())
         .map_err(|_| JsError::new("the recipe must be JSON-serialisable"))?

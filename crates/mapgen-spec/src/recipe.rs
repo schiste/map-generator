@@ -18,7 +18,8 @@
 //! `region` (repeated, or `regions` with `;` between values) and
 //! `worldview`. Lines starting with `#` are comments. A table with a
 //! `country`, `region` or `code` column instead is read as a list of
-//! regions with default settings.
+//! regions with default settings, and the wikitext of Wikipedia's
+//! `{{Choropleth map}}` template as its regions and view (`wikitext.rs`).
 
 use serde_json::Value;
 
@@ -37,6 +38,11 @@ pub struct Recipe {
     pub worldview: Option<String>,
     /// Every other setting, as `(parameter, value)`.
     pub params: Vec<(String, String)>,
+    /// Values or colours given per region (`{{Choropleth map}}`'s
+    /// `400: Brazil`), as `(region as written, value)`, for colouring tools.
+    pub values: Vec<(String, String)>,
+    /// What a translated input (the template) couldn't carry over, and why.
+    pub notes: Vec<String>,
 }
 
 /// Columns that make a table a list of regions.
@@ -54,6 +60,9 @@ const REGION_COLUMNS: [&str; 9] = [
 
 impl Recipe {
     pub fn parse(text: &str) -> Result<Recipe> {
+        if crate::wikitext::is_choropleth(text) {
+            return crate::wikitext::choropleth(text);
+        }
         let lines: String = text
             .trim_start_matches('\u{feff}')
             .lines()
@@ -150,6 +159,7 @@ impl Recipe {
             regions,
             worldview,
             params: params::to_pairs(&spec, ";").into_iter().collect(),
+            ..Recipe::default()
         }
     }
 
@@ -268,6 +278,7 @@ mod tests {
                 ("width".into(), "900".into()),
                 ("title".into(), "A, B".into()),
             ],
+            ..Recipe::default()
         };
         let csv = r.to_csv();
         assert!(csv.contains("key,value\ndataset,ne-admin0\nregion,FRA\nregion,DEU\nworldview,IND\ntitle,\"A, B\"\nwidth,900\n"), "{csv}");

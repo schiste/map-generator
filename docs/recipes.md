@@ -70,6 +70,35 @@ with the recipe's own spelling.
 A table with a `country`, `region`, `code`, `iso2` or `iso3` column (such as a Maphue export)
 is also accepted. It is read as a list of regions with default settings.
 
+## From Wikipedia's {{Choropleth map}}
+
+The wikitext of a [{{Choropleth map}}](https://en.wikipedia.org/wiki/Template:Choropleth_map)
+from an article is a recipe too: paste it as it is (surrounding text is fine) in the
+playground's recipe box, or `POST` it to `/api/v1/render` as `text/csv`.
+
+```wikitext
+{{Choropleth map
+| view = South America
+| height = 300
+| countries =
+400: BR
+300: UY; CL; PE
+#aff: SR; GY; GF
+}}
+```
+
+| Template | Recipe |
+| --- | --- |
+| `countries` | the regions, on a map of countries |
+| `entities`, `states`, `provinces` | the regions, on a `mixed` map (countries and single subdivisions) |
+| entities by Wikipedia title | the title, else without its disambiguation: `New York (state)` is New York; a name several regions share (`Nord (French department)`) is taken in the country most of the other regions are in |
+| `400:`, `40%:`, `#faa:` before entities | kept per region as `values` (`parseRecipe`), for colouring tools such as Maphue; the map itself stays empty |
+| `view` | a frame preset when one matches (`South America` → `south-america`); otherwise the map is framed on the regions |
+| `latitude`, `longitude`, `zoom` | the box the template's web map would show at that size |
+| `width`, `height` | the shape (a 250 × 300 thumbnail becomes 1000 × 1200) |
+| `caption`, `alt` | `caption`, `alt`, as plain text (links, templates and footnotes removed) |
+| `color`, `min-opacity`, `logarithmic-scale`, `legends`, `align`, `frameless`, `mapstyle`, `source` | not carried over; each is explained in the recipe's `notes`, which the playground shows |
+
 ## Where recipes come from
 
 - The playground's **Download recipe** button writes the current map as a recipe.
