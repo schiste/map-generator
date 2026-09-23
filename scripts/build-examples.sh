@@ -5,6 +5,8 @@
 #   scripts/fetch-data.sh geoboundaries FRA ADM1
 #   scripts/fetch-data.sh geoboundaries USA ADM2
 #   scripts/fetch-data.sh us-counties-fips
+#   scripts/fetch-data.sh ne-worldview IND
+#   scripts/fetch-data.sh ne-worldview PAK
 set -euo pipefail
 
 cargo build --release --quiet -p mapgen-cli
@@ -30,8 +32,17 @@ $M render -i "$D/ne_10m_admin_0.geojson" --dataset ne-admin0 --continent "South 
 $M render -i "$D/ne_10m_admin_0.geojson" --dataset ne-admin0 --frame world \
   --lakes "$D/ne_10m_lakes.geojson" --disputed "$D/ne_10m_disputed_lines.geojson" \
   --theme dark --padding 10 --width 1200 --title World -o "$E/world-dark.svg"
+# Labels in Japanese, Korean and Chinese; the viewer's language picks one.
 $M render -i "$D/ne_10m_admin_1.geojson" --dataset ne-admin1 --region JPN "${CTX[@]}" \
-  --theme light --width 700 --title Japan -o "$E/japan-light.svg"
+  --labels --languages ja,ko,zh-Hans,zh-Hant --theme light --width 700 --title Japan \
+  -o "$E/japan-light.svg"
+# Kashmir from India's and Pakistan's points of view, disputed areas hatched.
+for view in IND PAK; do
+  $M render -i "$D/ne_10m_admin_0.geojson" --dataset ne-admin0 --worldview "$view" \
+    --bbox 66,26,84,38 "${CTX[@]}" --disputed-areas "$D/ne_10m_disputed_areas.geojson" \
+    --labels --width 600 --title "Kashmir ($view view)" \
+    -o "$E/kashmir-$(echo "$view" | tr '[:upper:]' '[:lower:]').svg"
+done
 $M render -i "$D/ne_10m_admin_1.geojson" --dataset ne-admin1 --region FJI "${CTX[@]}" \
   --width 500 --title "Fiji (straddles 180°)" -o "$E/fiji.svg"
 

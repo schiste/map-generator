@@ -47,9 +47,10 @@ colour the map by country, neighbours included.
 
 | | |
 | --- | --- |
-| ![Europe](docs/examples/europe.svg) | ![Japan, light theme](docs/examples/japan-light.svg) |
+| ![Europe](docs/examples/europe.svg) | ![Japan, light theme, labels in Japanese, Korean or Chinese by viewer language](docs/examples/japan-light.svg) |
 | ![World, dark theme](docs/examples/world-dark.svg) | ![South America, curved label on Chile](docs/examples/south-america.svg) |
 | ![France, régions (IGN via geoBoundaries)](docs/examples/france-regions.svg) | ![US counties (Census Bureau, public domain), Albers, insets](docs/examples/usa-counties.svg) |
+| ![Kashmir, India's view](docs/examples/kashmir-ind.svg) | ![Kashmir, Pakistan's view](docs/examples/kashmir-pak.svg) |
 | ![Fiji, straddling 180°](docs/examples/fiji.svg) | |
 
 Open [`docs/examples/france-departements.html`](docs/examples/france-departements.html)

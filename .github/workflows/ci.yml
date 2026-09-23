@@ -51,6 +51,8 @@ jobs:
           scripts/fetch-data.sh geoboundaries FRA ADM1
           scripts/fetch-data.sh geoboundaries USA ADM2
           scripts/fetch-data.sh us-counties-fips
+          scripts/fetch-data.sh ne-worldview IND
+          scripts/fetch-data.sh ne-worldview PAK
       - run: scripts/build-examples.sh
       - name: Gallery is byte-identical
         run: git diff --exit-code --stat docs/examples
