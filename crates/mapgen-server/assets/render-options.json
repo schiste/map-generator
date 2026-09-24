@@ -686,6 +686,19 @@
       "advanced": false
     },
     {
+      "name": "disputed",
+      "key": "disputed",
+      "inRenderSpec": true,
+      "type": "boolean",
+      "label": "Disputed areas and borders",
+      "description": "Draw disputed areas (hatched) and disputed or claimed boundaries (dashed).",
+      "widget": "checkbox",
+      "default": true,
+      "group": "borders",
+      "order": 15,
+      "advanced": false
+    },
+    {
       "name": "border-mode",
       "key": "borderMode",
       "inRenderSpec": true,

@@ -576,7 +576,7 @@ pub enum Format {
 
 /// Options for one render (`MapGenerator.render(renderSpec)`). Mirrors the
 /// CLI flags; every field is optional.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RenderSpec {
     pub region: Option<String>,
@@ -619,6 +619,9 @@ pub struct RenderSpec {
     /// Also name the neighbouring (context) countries, where room is left.
     #[serde(default)]
     pub context_labels: bool,
+    /// Draw disputed areas (hatched) and disputed boundaries (dashed).
+    #[serde(default = "yes")]
+    pub disputed: bool,
     /// `countries` (national capitals) or `all` (also regional capitals).
     #[serde(default)]
     pub capitals: CapitalsSpec,
@@ -662,6 +665,13 @@ pub struct RenderSpec {
     pub center_lon: Option<f64>,
     #[serde(default)]
     pub format: Format,
+}
+
+/// The defaults of an empty spec, as the API and WASM read `{}`.
+impl Default for RenderSpec {
+    fn default() -> Self {
+        serde_json::from_value(serde_json::json!({})).expect("an empty spec is valid")
+    }
 }
 
 impl RenderSpec {
@@ -903,6 +913,10 @@ pub struct InsetOutput {
     pub projection: String,
 }
 
+fn yes() -> bool {
+    true
+}
+
 /// The layers a render draws from.
 #[derive(Debug, Clone, Copy)]
 pub struct Sources<'a> {
@@ -984,8 +998,14 @@ pub fn render_map(src: Sources, spec: &RenderSpec) -> Result<MapOutput> {
         subject,
         context: src.context.map(LoadedLayer::all).unwrap_or_default(),
         lakes: src.lakes.map(LoadedLayer::all).unwrap_or_default(),
-        disputed_areas: src.disputed_areas.map(LoadedLayer::all).unwrap_or_default(),
-        disputed: src.disputed.map(|d| d.lines.clone()).unwrap_or_default(),
+        disputed_areas: match src.disputed_areas {
+            Some(layer) if spec.disputed => layer.all(),
+            _ => Vec::new(),
+        },
+        disputed: match src.disputed {
+            Some(lines) if spec.disputed => lines.lines.clone(),
+            _ => Vec::new(),
+        },
         places: if spec.capitals == CapitalsSpec::None {
             Vec::new()
         } else {
@@ -1495,6 +1515,41 @@ mod tests {
         assert!(at("id=\"borders\"") < at("id=\"places\""));
         assert!(at("id=\"places\"") < at("id=\"labels\""));
         assert!(spec(r#"{"capitals": "some"}"#).is_err());
+    }
+
+    #[test]
+    fn disputed_areas_and_borders_can_be_left_out() {
+        let layer = twin();
+        let square = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"id":"XZ","name":"Contested"},"geometry":{"type":"Polygon","coordinates":[[[9.4,45.4],[9.6,45.4],[9.6,45.6],[9.4,45.6],[9.4,45.4]]]}}]}"#;
+        let areas = LoadedLayer::parse(square, &LayerSpec::default()).unwrap();
+        let line = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"id":"L1"},"geometry":{"type":"LineString","coordinates":[[9.2,45.2],[10.8,45.8]]}}]}"#;
+        let lines = LoadedLines::parse(line, &LayerSpec::default()).unwrap();
+        let src = Sources {
+            subject: &layer,
+            context: None,
+            lakes: None,
+            disputed_areas: Some(&areas),
+            disputed: Some(&lines),
+            places: None,
+            units: None,
+        };
+        let shown = render_map(src, &spec("{}").unwrap()).unwrap().svg;
+        // Drawn elements (the stylesheet names both classes either way).
+        let drawn = |svg: &str| {
+            (
+                svg.contains("class=\"mg-disputed-area"),
+                svg.contains("class=\"mg-border mg-border-disputed\""),
+            )
+        };
+        assert_eq!(drawn(&shown), (true, true), "{shown}");
+        assert!(
+            RenderSpec::default().disputed,
+            "on by default, as in the API"
+        );
+        let hidden = render_map(src, &spec(r#"{"disputed": false}"#).unwrap())
+            .unwrap()
+            .svg;
+        assert_eq!(drawn(&hidden), (false, false));
     }
 
     #[test]

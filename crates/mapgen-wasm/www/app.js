@@ -428,6 +428,7 @@ function currentSpec() {
   if (alt) spec.alt = alt;
   const height = Math.round(Number($("height").value));
   if (height) spec.height = Math.min(10000, Math.max(50, height));
+  if (!$("disputed").checked) spec.disputed = false;
   if ($("context-labels").checked) spec.contextLabels = true;
   if ($("capitals").value !== "none") spec.capitals = $("capitals").value;
   if (!$("insets").checked) spec.insets = "none";
@@ -465,6 +466,7 @@ function setControls(spec) {
   $("caption").value = take("caption", "");
   $("alt").value = take("alt", "");
   $("height").value = take("height", "");
+  $("disputed").checked = take("disputed", true);
   $("context-labels").checked = take("contextLabels", false);
   $("capitals").value = take("capitals", "none");
   $("insets").checked = take("insets", "auto") !== "none";
@@ -491,7 +493,7 @@ async function renderNow() {
   // Nothing selected yet: the world, to pick countries from.
   const g = picking ? await generator("countries") : generators[state.mode];
   const spec = picking
-    ? { frame: "world", width: 1200, theme: $("theme").value, colors: { ...state.colors } }
+    ? { frame: "world", width: 1200, theme: $("theme").value, colors: { ...state.colors }, disputed: $("disputed").checked }
     : file ? currentSpec() : { ...currentSpec(), regions: [...state.selected] };
   if (spec.capitals) await ensurePlaces(g);
   const t = performance.now();
@@ -660,7 +662,7 @@ function bindControls() {
   $("theme").addEventListener("change", (e) => applyTheme(e.target.value));
   for (const id of [
     "title", "width", "labels", "languages", "target", "projection", "frame", "insets", "credit",
-    "show-title", "caption", "alt", "height", "context-labels", "capitals",
+    "show-title", "caption", "alt", "height", "disputed", "context-labels", "capitals",
     "bbox-west", "bbox-south", "bbox-east", "bbox-north",
   ]) {
     $(id).addEventListener("change", render);

@@ -573,6 +573,15 @@
       "description": "A Natural Earth point of view on disputed borders, applied to neighbouring countries (and to the regions of Natural Earth country maps). Default: de facto. The choices are the points of view this host has."
      },
      {
+      "name": "disputed",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": true
+      },
+      "description": "Draw disputed areas (hatched) and disputed or claimed boundaries (dashed)."
+     },
+     {
       "name": "border-mode",
       "in": "query",
       "schema": {

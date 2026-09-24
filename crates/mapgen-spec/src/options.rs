@@ -568,6 +568,12 @@ pub fn options(max_width: u32) -> Vec<RenderOption> {
             ..o("worldview", String, W::Select, "borders", 10)
         },
         RenderOption {
+            label: "Disputed areas and borders",
+            description: "Draw disputed areas (hatched) and disputed or claimed boundaries (dashed).",
+            default: Some(json!(true)),
+            ..o("disputed", Boolean, W::Checkbox, "borders", 15)
+        },
+        RenderOption {
             label: "Border drawing",
             description: "Borders drawn once in their own layer, or each region stroking its own outline (for hover effects).",
             default: Some(json!("layer")),

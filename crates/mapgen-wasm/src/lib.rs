@@ -99,6 +99,8 @@ export interface RenderSpec {
   labels?: boolean;
   /** Also name neighbouring countries, where room is left. */
   contextLabels?: boolean;
+  /** Draw disputed areas (hatched) and disputed boundaries (dashed); default true. */
+  disputed?: boolean;
   /** Draw capitals (from `setPlaces`): national, or also regional ones. */
   capitals?: "none" | "countries" | "all";
   /** Also label in these languages (read with LayerSpec.languages): a <switch> on systemLanguage per label. */

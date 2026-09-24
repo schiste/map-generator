@@ -74,6 +74,7 @@ Query parameters are the `RenderSpec` fields in kebab-case:
   `languages=fr,zh-Hant`, `target=commons|web`, `css-vars`;
 - `capitals=countries|all` (national capitals, or also regional capitals inside the map)
   and `context-labels` (name the neighbouring countries);
+- `disputed=false` to leave out disputed areas (hatched) and disputed boundaries (dashed);
 - `title`, `show-title` (draw it above the map), `caption` (under the map), `alt` (for
   screen readers);
 - `frame`, `bbox`, `projection`, `insets`, `border-mode`, `credit`;
