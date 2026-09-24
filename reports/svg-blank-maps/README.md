@@ -14,6 +14,8 @@ Catalog source: [Category:SVG blank maps](https://commons.wikimedia.org/wiki/Cat
 
 See maps.csv for one row per unique Commons file. Coverage is inferred from filenames, Commons categories, and file descriptions; short descriptions use Commons prose where it is useful and generated fallbacks where it is absent or generic. Some labels may be ambiguous, so each row links to the Commons file page and its categories for review.
 
+Open dashboard.html directly in a modern browser for an offline, searchable view of the catalog, review flags, usage distribution, and duplicate candidate pairs. Its snapshot data is embedded in the page.
+
 ## Most-used files
 
 | Map | Distinct usage pages |
