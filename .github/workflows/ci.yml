@@ -53,7 +53,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: data
           key: data-${{ runner.os }}-${{ hashFiles('scripts/fetch-data.sh') }}
@@ -121,7 +121,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: crates/mapgen-wasm/package-lock.json
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: data
           key: data-${{ runner.os }}-${{ hashFiles('scripts/fetch-data.sh') }}
