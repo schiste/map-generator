@@ -9,6 +9,9 @@
 # local tooling
 .aethyme/*
 !.aethyme/config.toml
+!.aethyme/gates.toml
+!.aethyme/repository.json
+!.aethyme/generated/
 .chau7/
 .playwright-mcp/
 
