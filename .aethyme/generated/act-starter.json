@@ -1,0 +1,98 @@
+{
+  "schema_version": "aethyme-act-starter-v1",
+  "repo": {
+    "name": "map-generator",
+    "kind": "repository"
+  },
+  "recommended_mode": "repo-act",
+  "starter_checklists": {
+    "debugging": [
+      "Load repo-onboarding first if the repository or area is unfamiliar.",
+      "Run Aethyme Explore on the user task before broad manual search.",
+      "Verify answer candidates before concluding when trust_policy is not answer-safe.",
+      "Identify the nearest fast test or validation command before editing.",
+      "Inspect caution zones before changing generated or vendored areas."
+    ],
+    "change_validation": [
+      "Run the fastest relevant test command first.",
+      "Check likely entrypoints and impacted callers before finishing.",
+      "Re-run lint/build only after the focused validation passes.",
+      "Document any override-based maintainer note that affected the change plan."
+    ]
+  },
+  "commands": {
+    "fast_test": "cargo test --workspace",
+    "full_test": null,
+    "lint": null,
+    "build": "cargo build --workspace",
+    "dev": "cargo run"
+  },
+  "entrypoints": [
+    {
+      "path": "Procfile:web",
+      "kind": "process",
+      "role": "app",
+      "reason": "Procfile process entrypoint",
+      "confidence": "high",
+      "relevance": "supporting"
+    },
+    {
+      "path": "crates/mapgen-cli/src/main.rs",
+      "kind": "file",
+      "role": "cli",
+      "reason": "tracked Rust binary entrypoint in `.`",
+      "confidence": "high",
+      "workspace_root": ".",
+      "provenance": "derived from tracked workspace source",
+      "executable_name": "mapgen",
+      "relevance": "supporting"
+    },
+    {
+      "path": "crates/mapgen-server/src/main.rs",
+      "kind": "file",
+      "role": "cli",
+      "reason": "tracked Rust binary entrypoint in `.`",
+      "confidence": "high",
+      "workspace_root": ".",
+      "provenance": "derived from tracked workspace source",
+      "executable_name": "mapgen-server",
+      "relevance": "supporting"
+    }
+  ],
+  "primary_entrypoints": {
+    "app": {
+      "path": "Procfile:web",
+      "kind": "process",
+      "role": "app",
+      "reason": "Procfile process entrypoint",
+      "confidence": "high",
+      "relevance": "supporting"
+    },
+    "cli": {
+      "path": "crates/mapgen-cli/src/main.rs",
+      "kind": "file",
+      "role": "cli",
+      "reason": "tracked Rust binary entrypoint in `.`",
+      "confidence": "high",
+      "workspace_root": ".",
+      "provenance": "derived from tracked workspace source",
+      "executable_name": "mapgen",
+      "relevance": "supporting"
+    },
+    "test": {
+      "path": "tests",
+      "kind": "directory",
+      "role": "test",
+      "reason": "conventional test root",
+      "confidence": "medium",
+      "relevance": "supporting"
+    }
+  },
+  "caution_zones": [],
+  "telemetry": {
+    "derived_from": ".aethyme/generated/onboarding.json",
+    "entrypoint_count": 4,
+    "primary_entrypoint_count": 3,
+    "caution_zone_count": 0
+  }
+}
