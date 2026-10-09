@@ -73,11 +73,12 @@ description: Use when starting work in an unfamiliar repository, when the task a
 ## Generated and Dangerous Paths
 
 - Generated/vendor `.aethyme/generated`: tracked generated or vendored surface; verify ownership before editing
+- Sensitive `.aethyme/gates.toml`: repository validation policy; changes affect every broker submission
 - Sensitive `.github/workflows`: repository automation; changes can affect publication or shared CI
 
 ## Freshness
 
-- Source digest: `9d585c352194147824bc58c079ba104409fa5271d4cab3e0f4363992fb631475`
-- Tracked source files: `131`
+- Source digest: `a4e4ab608b581278da8d3cb4fbefea7c0159eb38a2de4323ddfe61f982828bf4`
+- Tracked source files: `133`
 - Overrides applied: `False`
 - Sections generated: `repo, workspaces, primary_workspace, commands, areas, entrypoints, caution_zones, generated_paths, dangerous_paths, navigation_recipes, summon, freshness`
